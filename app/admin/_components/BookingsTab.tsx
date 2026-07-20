@@ -6,6 +6,7 @@ import DateCalendar from '@/components/DateCalendar';
 import { buildTimeSlots, todayISODate } from '@/lib/timeSlots';
 import { fetchSiteSettings, DEFAULT_SITE_SETTINGS, type SiteSettings } from '@/lib/siteSettings';
 import { fetchHolidays, type Holiday } from '@/lib/holidays';
+import { fetchPriceTiers, getSlotPrice, formatPrice, type PriceTier } from '@/lib/priceTiers';
 
 type BookingStatus = 'pending' | 'confirmed' | 'cancelled';
 type DateFilterMode = 'all' | 'today' | 'week' | 'month' | 'custom';
@@ -16,11 +17,13 @@ interface Booking {
   court_id: string;
   player_name: string;
   player_phone: string;
+  player_email: string | null;
   start_time: string;
   end_time: string;
   status: BookingStatus;
   receipt_url: string | null;
   created_at: string;
+  price: number | null;
   courts: { name: string } | null;
 }
 
@@ -100,6 +103,7 @@ export default function BookingsTab() {
   const [receiptModalUrl, setReceiptModalUrl] = useState<string | null>(null);
   const [settings, setSettings] = useState<SiteSettings>(DEFAULT_SITE_SETTINGS);
   const [holidays, setHolidays] = useState<Holiday[]>([]);
+  const [priceTiers, setPriceTiers] = useState<PriceTier[]>([]);
   const [now, setNow] = useState(() => Date.now());
   const [courts, setCourts] = useState<Court[]>([]);
 
@@ -114,6 +118,7 @@ export default function BookingsTab() {
   useEffect(() => {
     fetchSiteSettings(supabase).then(setSettings);
     fetchHolidays(supabase).then(setHolidays);
+    fetchPriceTiers(supabase).then(setPriceTiers);
     supabase
       .from('courts')
       .select('id, name')
@@ -183,7 +188,7 @@ export default function BookingsTab() {
     const { data, error } = await supabase
       .from('bookings')
       .select(
-        'id, court_id, player_name, player_phone, start_time, end_time, status, receipt_url, created_at, courts(name)'
+        'id, court_id, player_name, player_phone, player_email, start_time, end_time, status, receipt_url, created_at, price, courts(name)'
       )
       .order('id', { ascending: false });
 
@@ -261,6 +266,17 @@ export default function BookingsTab() {
 
     setBookings((prev) => prev.map((b) => (b.id === bookingId ? { ...b, status } : b)));
     setUpdatingId(null);
+
+    // Best-effort customer email alert — the status change already
+    // succeeded, so a notification failure shouldn't block or roll back
+    // the approval itself.
+    if (status === 'confirmed' && settings.notify_customer_on_approval) {
+      fetch('/api/bookings/confirm-notify', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ bookingId }),
+      }).catch((err) => console.error('Failed to trigger confirmation email:', err));
+    }
   }
 
   // ---------- Reschedule ----------
@@ -347,9 +363,12 @@ export default function BookingsTab() {
     setRescheduleSaving(true);
     setRescheduleError(null);
 
-    const updates: Record<string, string> = {
+    const updates: Record<string, string | number> = {
       start_time: slot.startISO(rescheduleDate),
       end_time: slot.endISO(rescheduleDate),
+      // Recalculate in case the new slot falls in a different price tier
+      // than the original one.
+      price: getSlotPrice(slot.hour, settings.pricing_mode, settings.flat_price, priceTiers),
     };
     // Give it a fresh hold window rather than having it show as
     // immediately hold-expired right after being rescheduled.
@@ -492,6 +511,7 @@ export default function BookingsTab() {
                   <th className="px-4 sm:px-6 py-3">Phone</th>
                   <th className="px-4 sm:px-6 py-3">Date &amp; Time</th>
                   <th className="px-4 sm:px-6 py-3">Court</th>
+                  {settings.show_price && <th className="px-4 sm:px-6 py-3">Price</th>}
                   <th className="px-4 sm:px-6 py-3">Status</th>
                   <th className="px-4 sm:px-6 py-3">Receipt</th>
                   <th className="px-4 sm:px-6 py-3">Actions</th>
@@ -506,7 +526,10 @@ export default function BookingsTab() {
                         {booking.player_name}
                       </td>
                       <td className="px-4 sm:px-6 py-3 text-slate-600 whitespace-nowrap">
-                        {booking.player_phone}
+                        <div>{booking.player_phone}</div>
+                        {booking.player_email && (
+                          <div className="text-xs text-slate-400">{booking.player_email}</div>
+                        )}
                       </td>
                       <td className="px-4 sm:px-6 py-3 text-slate-600 whitespace-nowrap">
                         {formatDateTime(booking.start_time)}
@@ -514,6 +537,11 @@ export default function BookingsTab() {
                       <td className="px-4 sm:px-6 py-3 text-slate-600 whitespace-nowrap">
                         {booking.courts?.name ?? '—'}
                       </td>
+                      {settings.show_price && (
+                        <td className="px-4 sm:px-6 py-3 text-slate-600 whitespace-nowrap">
+                          {booking.price !== null ? formatPrice(booking.price) : '—'}
+                        </td>
+                      )}
                       <td className="px-4 sm:px-6 py-3 whitespace-nowrap">
                         <span
                           className={`inline-block rounded-full px-2.5 py-1 text-xs font-medium capitalize ${STATUS_STYLES[booking.status]}`}

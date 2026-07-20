@@ -1,5 +1,6 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import { DEFAULT_OPENING_HOUR, DEFAULT_CLOSING_HOUR } from './timeSlots';
+import type { PricingMode } from './priceTiers';
 
 // 0 = Sunday ... 6 = Saturday, matching JS Date#getDay().
 export const ALL_DAYS_OPEN = [0, 1, 2, 3, 4, 5, 6];
@@ -17,6 +18,11 @@ export interface SiteSettings {
   closing_hour: number;
   open_days: number[];
   pending_hold_minutes: number;
+  allow_multi_slot_booking: boolean;
+  show_price: boolean;
+  pricing_mode: PricingMode;
+  flat_price: number;
+  notify_customer_on_approval: boolean;
 }
 
 // Matches the current hardcoded look of the app, so sites that haven't
@@ -34,10 +40,15 @@ export const DEFAULT_SITE_SETTINGS: SiteSettings = {
   closing_hour: DEFAULT_CLOSING_HOUR,
   open_days: ALL_DAYS_OPEN,
   pending_hold_minutes: 10,
+  allow_multi_slot_booking: false,
+  show_price: false,
+  pricing_mode: 'flat',
+  flat_price: 0,
+  notify_customer_on_approval: false,
 };
 
 const SITE_SETTINGS_COLUMNS =
-  'site_title, site_subtitle, logo_url, primary_color, submit_button_label, gcash_qr_url, payment_note, opening_hour, closing_hour, open_days, pending_hold_minutes';
+  'site_title, site_subtitle, logo_url, primary_color, submit_button_label, gcash_qr_url, payment_note, opening_hour, closing_hour, open_days, pending_hold_minutes, allow_multi_slot_booking, show_price, pricing_mode, flat_price, notify_customer_on_approval';
 
 // Branding is a nice-to-have, not core booking functionality — if the table
 // isn't set up yet or the query fails for any reason, fall back to defaults

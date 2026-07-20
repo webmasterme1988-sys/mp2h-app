@@ -1,0 +1,117 @@
+import { NextResponse, type NextRequest } from 'next/server';
+import { cookies } from 'next/headers';
+import { createServerClient } from '@supabase/ssr';
+import { createPublicServerClient } from '@/lib/supabase/publicServerClient';
+import { getMailTransporter } from '@/lib/mailer';
+import { fetchSiteSettings } from '@/lib/siteSettings';
+import { formatPrice } from '@/lib/priceTiers';
+
+interface ConfirmedBookingRow {
+  id: string;
+  player_name: string;
+  player_email: string | null;
+  start_time: string;
+  price: number | null;
+  courts: { name: string } | null;
+}
+
+export async function POST(request: NextRequest) {
+  // Only triggered from the admin dashboard's Approve action — verify the
+  // caller is actually a logged-in admin rather than trusting the request.
+  const cookieStore = await cookies();
+  const authedSupabase = createServerClient(
+    process.env.NEXT_PUBLIC_SUPABASE_URL!,
+    process.env.NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY || process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!,
+    {
+      cookies: {
+        getAll() {
+          return cookieStore.getAll();
+        },
+        setAll() {
+          // Not needed for a read-only session check in a Route Handler.
+        },
+      },
+    }
+  );
+
+  const {
+    data: { user },
+  } = await authedSupabase.auth.getUser();
+
+  if (!user) {
+    return NextResponse.json({ error: 'Not authenticated.' }, { status: 401 });
+  }
+
+  const { bookingId } = (await request.json().catch(() => ({}))) as { bookingId?: string };
+  if (!bookingId) {
+    return NextResponse.json({ error: 'Missing bookingId.' }, { status: 400 });
+  }
+
+  const supabase = createPublicServerClient();
+
+  // The setting is authoritative here too, not just on the client — if it's
+  // off, this route is a no-op regardless of what triggered the call.
+  const settings = await fetchSiteSettings(supabase);
+  if (!settings.notify_customer_on_approval) {
+    return NextResponse.json({ success: true, skipped: 'notifications_disabled' });
+  }
+
+  const { data, error } = await supabase
+    .from('bookings')
+    .select('id, player_name, player_email, start_time, price, courts(name)')
+    .eq('id', bookingId)
+    .eq('status', 'confirmed')
+    .maybeSingle();
+
+  const booking = data as unknown as ConfirmedBookingRow | null;
+
+  if (error || !booking) {
+    return NextResponse.json({ error: 'Confirmed booking not found.' }, { status: 404 });
+  }
+
+  if (!booking.player_email) {
+    // Bookings made before the email field existed won't have one — not an
+    // error, just nothing to send.
+    return NextResponse.json({ success: true, skipped: 'no_email_on_file' });
+  }
+
+  let transporter;
+  try {
+    transporter = getMailTransporter();
+  } catch (err) {
+    console.error(err);
+    return NextResponse.json({ error: 'Notifications are not configured yet.' }, { status: 500 });
+  }
+
+  const courtName = booking.courts?.name ?? 'your court';
+  const when = new Date(booking.start_time).toLocaleString('en-US', {
+    dateStyle: 'medium',
+    timeStyle: 'short',
+    timeZone: 'Asia/Manila',
+  });
+
+  try {
+    await transporter.sendMail({
+      from: process.env.GMAIL_USER,
+      to: booking.player_email,
+      subject: `Booking confirmed — ${courtName}, ${when}`,
+      text: [
+        `Hi ${booking.player_name},`,
+        '',
+        `Your booking is confirmed!`,
+        `Court: ${courtName}`,
+        `When: ${when} (Philippine time)`,
+        booking.price !== null ? `Price: ${formatPrice(booking.price)}` : '',
+        '',
+        'See you on the court!',
+      ]
+        .filter(Boolean)
+        .join('\n'),
+    });
+  } catch (err) {
+    console.error('Failed to send confirmation email:', err);
+    return NextResponse.json({ error: 'Could not send confirmation email.' }, { status: 500 });
+  }
+
+  return NextResponse.json({ success: true });
+}

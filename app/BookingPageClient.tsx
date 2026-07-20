@@ -8,6 +8,7 @@ import { type SiteSettings } from '@/lib/siteSettings';
 import { type PaymentQrCode } from '@/lib/paymentQrCodes';
 import { type Holiday } from '@/lib/holidays';
 import { compressImage } from '@/lib/compressImage';
+import { getSlotPrice, formatPrice, type PriceTier } from '@/lib/priceTiers';
 
 // ---------- Types ----------
 
@@ -22,6 +23,7 @@ interface BookingPageClientProps {
   initialSettings: SiteSettings;
   initialQrCodes: PaymentQrCode[];
   initialHolidays: Holiday[];
+  initialPriceTiers: PriceTier[];
 }
 
 // ---------- Component ----------
@@ -30,6 +32,7 @@ export default function BookingPageClient({
   initialSettings,
   initialQrCodes,
   initialHolidays,
+  initialPriceTiers,
 }: BookingPageClientProps) {
   // Seeded from the server-rendered HTML, so the real branding (color, logo,
   // title) is correct from the very first paint — no default-then-real flash.
@@ -38,6 +41,7 @@ export default function BookingPageClient({
   const [selectedQrIndex, setSelectedQrIndex] = useState(0);
   const [downloadingQr, setDownloadingQr] = useState(false);
   const [holidays] = useState<Holiday[]>(initialHolidays);
+  const [priceTiers] = useState<PriceTier[]>(initialPriceTiers);
   const [courts, setCourts] = useState<Court[]>([]);
   const [selectedCourtId, setSelectedCourtId] = useState<string | null>(null);
   const [selectedDate, setSelectedDate] = useState<string>(todayISODate());
@@ -46,11 +50,15 @@ export default function BookingPageClient({
   const [loadingSlots, setLoadingSlots] = useState(false);
   const [slotsError, setSlotsError] = useState<string | null>(null);
 
-  const [selectedSlot, setSelectedSlot] = useState<TimeSlot | null>(null);
+  // In single-slot mode this always holds exactly one slot (or none). In
+  // multi-slot mode it accumulates every slot the customer has toggled on
+  // before opening the modal.
+  const [selectedSlots, setSelectedSlots] = useState<TimeSlot[]>([]);
   const [modalOpen, setModalOpen] = useState(false);
 
   const [playerName, setPlayerName] = useState('');
   const [playerPhone, setPlayerPhone] = useState('');
+  const [playerEmail, setPlayerEmail] = useState('');
   const [receiptFile, setReceiptFile] = useState<File | null>(null);
   const [receiptPreview, setReceiptPreview] = useState<string | null>(null);
   const [compressingReceipt, setCompressingReceipt] = useState(false);
@@ -70,6 +78,16 @@ export default function BookingPageClient({
   const timeSlots = useMemo(
     () => buildTimeSlots(settings.opening_hour, settings.closing_hour),
     [settings.opening_hour, settings.closing_hour]
+  );
+
+  const getPrice = useCallback(
+    (hour: number) => getSlotPrice(hour, settings.pricing_mode, settings.flat_price, priceTiers),
+    [settings.pricing_mode, settings.flat_price, priceTiers]
+  );
+
+  const totalPrice = useMemo(
+    () => selectedSlots.reduce((sum, slot) => sum + getPrice(slot.hour), 0),
+    [selectedSlots, getPrice]
   );
 
   const holidayDates = useMemo(() => new Set(holidays.map((h) => h.holiday_date)), [holidays]);
@@ -206,11 +224,15 @@ export default function BookingPageClient({
     return new Date(slot.startISO(selectedDate)).getTime() <= now;
   }
 
-  function handleSlotClick(slot: TimeSlot) {
-    if (isSlotBooked(slot) || isSlotBlocked(slot) || isSlotPast(slot)) return;
-    setSelectedSlot(slot);
+  function isSlotSelected(slot: TimeSlot) {
+    return selectedSlots.some((s) => s.hour === slot.hour);
+  }
+
+  function openModalWithSlots(slots: TimeSlot[]) {
+    setSelectedSlots(slots);
     setPlayerName('');
     setPlayerPhone('');
+    setPlayerEmail('');
     setReceiptFile(null);
     setReceiptPreview(null);
     setSubmitState('idle');
@@ -219,10 +241,34 @@ export default function BookingPageClient({
     setModalOpen(true);
   }
 
+  function handleSlotClick(slot: TimeSlot) {
+    if (isSlotBooked(slot) || isSlotBlocked(slot) || isSlotPast(slot)) return;
+
+    if (!settings.allow_multi_slot_booking) {
+      openModalWithSlots([slot]);
+      return;
+    }
+
+    // Multi-slot mode: toggle this slot in/out of the selection instead of
+    // immediately opening the modal, so the customer can pick several
+    // before confirming. Checks `prev` inside the updater rather than the
+    // outer closure so rapid clicks can't read a stale selection.
+    setSelectedSlots((prev) =>
+      prev.some((s) => s.hour === slot.hour)
+        ? prev.filter((s) => s.hour !== slot.hour)
+        : [...prev, slot].sort((a, b) => a.hour - b.hour)
+    );
+  }
+
+  function handleBookSelectedSlots() {
+    if (selectedSlots.length === 0) return;
+    openModalWithSlots(selectedSlots);
+  }
+
   function closeModal() {
     if (submitState === 'uploading' || submitState === 'saving') return;
     setModalOpen(false);
-    setSelectedSlot(null);
+    setSelectedSlots([]);
   }
 
   async function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
@@ -276,7 +322,7 @@ export default function BookingPageClient({
   // ---------- Submit booking ----------
 
   async function handleSubmitBooking() {
-    if (!selectedSlot || !selectedCourtId) return;
+    if (selectedSlots.length === 0 || !selectedCourtId) return;
 
     if (!playerName.trim()) {
       setSubmitError('Please enter your name.');
@@ -284,6 +330,10 @@ export default function BookingPageClient({
     }
     if (!playerPhone.trim()) {
       setSubmitError('Please enter your phone number.');
+      return;
+    }
+    if (!playerEmail.trim() || !/\S+@\S+\.\S+/.test(playerEmail.trim())) {
+      setSubmitError('Please enter a valid email address.');
       return;
     }
     if (!receiptFile) {
@@ -294,12 +344,13 @@ export default function BookingPageClient({
     setSubmitError(null);
 
     try {
-      // 1. Upload receipt to Supabase Storage
+      // 1. Upload receipt to Supabase Storage — one receipt covers every
+      // slot in this submission, since it's a single payment for all of them.
       setSubmitState('uploading');
 
       const fileExt = receiptFile.name.split('.').pop() || 'jpg';
       const safeName = playerName.trim().replace(/[^a-zA-Z0-9]/g, '-').toLowerCase();
-      const filePath = `${selectedDate}/court-${selectedCourtId}-${selectedSlot.hour}h-${safeName}-${Date.now()}.${fileExt}`;
+      const filePath = `${selectedDate}/court-${selectedCourtId}-${safeName}-${Date.now()}.${fileExt}`;
 
       const { error: uploadError } = await supabase.storage
         .from('receipts')
@@ -315,22 +366,25 @@ export default function BookingPageClient({
       const { data: publicUrlData } = supabase.storage.from('receipts').getPublicUrl(filePath);
       const receiptUrl = publicUrlData.publicUrl;
 
-      // 2. Insert booking row
+      // 2. Insert one booking row per selected slot
       setSubmitState('saving');
 
-      const { data: insertedBooking, error: insertError } = await supabase
+      const { data: insertedBookings, error: insertError } = await supabase
         .from('bookings')
-        .insert({
-          court_id: selectedCourtId,
-          player_name: playerName.trim(),
-          player_phone: playerPhone.trim(),
-          start_time: selectedSlot.startISO(selectedDate),
-          end_time: selectedSlot.endISO(selectedDate),
-          status: 'pending',
-          receipt_url: receiptUrl,
-        })
-        .select('id')
-        .single();
+        .insert(
+          selectedSlots.map((slot) => ({
+            court_id: selectedCourtId,
+            player_name: playerName.trim(),
+            player_phone: playerPhone.trim(),
+            player_email: playerEmail.trim(),
+            start_time: slot.startISO(selectedDate),
+            end_time: slot.endISO(selectedDate),
+            status: 'pending',
+            receipt_url: receiptUrl,
+            price: getPrice(slot.hour),
+          }))
+        )
+        .select('id');
 
       if (insertError) {
         throw new Error(`Booking could not be saved: ${insertError.message}`);
@@ -342,18 +396,18 @@ export default function BookingPageClient({
       // Best-effort admin email alert — the booking itself already
       // succeeded, so a notification failure shouldn't surface as an error
       // to the customer.
-      if (insertedBooking) {
+      if (insertedBookings && insertedBookings.length > 0) {
         fetch('/api/bookings/notify', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ bookingId: insertedBooking.id }),
+          body: JSON.stringify({ bookingIds: insertedBookings.map((b) => b.id) }),
         }).catch((err) => console.error('Failed to trigger booking notification:', err));
       }
 
       // Auto-close after a short confirmation pause
       setTimeout(() => {
         setModalOpen(false);
-        setSelectedSlot(null);
+        setSelectedSlots([]);
         setSubmitState('idle');
       }, 1800);
     } catch (err) {
@@ -458,24 +512,44 @@ export default function BookingPageClient({
                 const booked = isSlotBooked(slot);
                 const blocked = isSlotBlocked(slot);
                 const past = !booked && !blocked && isSlotPast(slot);
+                const selected = settings.allow_multi_slot_booking && isSlotSelected(slot);
                 return (
                   <button
                     key={slot.hour}
                     disabled={booked || blocked || past}
                     onClick={() => handleSlotClick(slot)}
+                    style={selected ? { backgroundColor: settings.primary_color, borderColor: settings.primary_color } : undefined}
                     className={`rounded-xl border px-3 py-3 text-sm font-medium text-center transition-colors ${
                       booked
                         ? 'bg-slate-100 border-slate-200 text-slate-400 cursor-not-allowed line-through'
                         : blocked || past
                         ? 'bg-slate-50 border-slate-200 text-slate-400 cursor-not-allowed'
+                        : selected
+                        ? 'text-white'
                         : 'bg-white border-slate-300 text-slate-700 hover:bg-emerald-50 hover:border-emerald-400 active:scale-[0.98]'
                     }`}
                   >
                     {blocked ? 'Unavailable' : past ? 'Past' : slot.label}
+                    {!blocked && !past && !booked && settings.show_price && (
+                      <span className={`block text-xs mt-0.5 ${selected ? 'text-white/90' : 'text-slate-400'}`}>
+                        {formatPrice(getPrice(slot.hour))}
+                      </span>
+                    )}
                   </button>
                 );
               })}
             </div>
+          )}
+
+          {settings.allow_multi_slot_booking && selectedSlots.length > 0 && (
+            <button
+              onClick={handleBookSelectedSlots}
+              style={{ backgroundColor: settings.primary_color }}
+              className="w-full mt-4 rounded-xl text-white font-medium py-3 text-sm hover:brightness-90 transition-[filter]"
+            >
+              Book {selectedSlots.length} Selected Slot{selectedSlots.length > 1 ? 's' : ''}
+              {settings.show_price ? ` — ${formatPrice(totalPrice)}` : ''}
+            </button>
           )}
 
           <div className="flex items-center gap-4 mt-4 text-xs text-slate-500">
@@ -496,14 +570,17 @@ export default function BookingPageClient({
       </main>
 
       {/* Booking Modal */}
-      {modalOpen && selectedSlot && (
+      {modalOpen && selectedSlots.length > 0 && (
         <div className="fixed inset-0 z-50 flex items-end sm:items-center justify-center bg-black/50 p-0 sm:p-4">
           <div className="bg-white w-full sm:max-w-md sm:rounded-2xl rounded-t-2xl max-h-[92vh] overflow-y-auto">
             <div className="sticky top-0 bg-white border-b border-slate-200 px-5 py-4 flex items-center justify-between">
               <div>
                 <h3 className="font-semibold text-slate-800">Confirm your booking</h3>
                 <p className="text-xs text-slate-500 mt-0.5">
-                  {courts.find((c) => c.id === selectedCourtId)?.name} · {selectedDate} · {selectedSlot.label}
+                  {courts.find((c) => c.id === selectedCourtId)?.name} · {selectedDate} ·{' '}
+                  {selectedSlots.length === 1
+                    ? selectedSlots[0].label
+                    : `${selectedSlots.length} slots selected`}
                 </p>
               </div>
               <button
@@ -523,11 +600,46 @@ export default function BookingPageClient({
                   </div>
                   <p className="font-medium text-slate-800">Booking submitted!</p>
                   <p className="text-sm text-slate-500 mt-1">
-                    Your slot is pending confirmation. We&apos;ll verify your payment shortly.
+                    {selectedSlots.length > 1
+                      ? 'Your slots are pending confirmation. '
+                      : 'Your slot is pending confirmation. '}
+                    We&apos;ll verify your payment shortly.
                   </p>
                 </div>
               ) : (
                 <>
+                  {(selectedSlots.length > 1 || settings.show_price) && (
+                    <div className="rounded-xl border border-slate-200 p-3">
+                      {selectedSlots.length > 1 ? (
+                        <div className="space-y-1">
+                          {selectedSlots.map((slot) => (
+                            <div key={slot.hour} className="flex justify-between text-sm text-slate-600">
+                              <span>{slot.label}</span>
+                              {settings.show_price && <span>{formatPrice(getPrice(slot.hour))}</span>}
+                            </div>
+                          ))}
+                        </div>
+                      ) : (
+                        settings.show_price && (
+                          <div className="flex justify-between text-sm text-slate-600">
+                            <span>{selectedSlots[0].label}</span>
+                            <span>{formatPrice(getPrice(selectedSlots[0].hour))}</span>
+                          </div>
+                        )
+                      )}
+                      {settings.show_price && (
+                        <div
+                          className={`flex justify-between text-sm font-semibold text-slate-800 ${
+                            selectedSlots.length > 1 ? 'mt-2 pt-2 border-t border-slate-200' : ''
+                          }`}
+                        >
+                          <span>Total</span>
+                          <span>{formatPrice(totalPrice)}</span>
+                        </div>
+                      )}
+                    </div>
+                  )}
+
                   {/* Name / Phone */}
                   <div>
                     <label className="block text-sm font-medium text-slate-600 mb-1">Full Name</label>
@@ -549,6 +661,22 @@ export default function BookingPageClient({
                       placeholder="09XX XXX XXXX"
                       className="w-full rounded-xl border border-slate-300 px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
                     />
+                  </div>
+
+                  <div>
+                    <label className="block text-sm font-medium text-slate-600 mb-1">
+                      Email Address
+                    </label>
+                    <input
+                      type="email"
+                      value={playerEmail}
+                      onChange={(e) => setPlayerEmail(e.target.value)}
+                      placeholder="juan@example.com"
+                      className="w-full rounded-xl border border-slate-300 px-4 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                    />
+                    <p className="text-xs text-slate-400 mt-1">
+                      We&apos;ll email you once your booking is confirmed.
+                    </p>
                   </div>
 
                   {/* Payment QR */}

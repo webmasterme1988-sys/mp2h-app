@@ -7,18 +7,28 @@ import BookingsTab from './_components/BookingsTab';
 import CourtsTab from './_components/CourtsTab';
 import BlockSlotsTab from './_components/BlockSlotsTab';
 import HoursTab from './_components/HoursTab';
+import PricingTab from './_components/PricingTab';
 import BrandingTab from './_components/BrandingTab';
 import AdminsTab from './_components/AdminsTab';
 import DangerZoneTab from './_components/DangerZoneTab';
 import ChangePasswordModal from './_components/ChangePasswordModal';
 
-type TabId = 'bookings' | 'courts' | 'blocks' | 'hours' | 'branding' | 'admins' | 'danger';
+type TabId =
+  | 'bookings'
+  | 'courts'
+  | 'blocks'
+  | 'hours'
+  | 'pricing'
+  | 'branding'
+  | 'admins'
+  | 'danger';
 
 const TABS: { id: TabId; label: string; superAdminOnly?: boolean }[] = [
   { id: 'bookings', label: 'Bookings' },
   { id: 'courts', label: 'Courts' },
   { id: 'blocks', label: 'Block Time Slots' },
   { id: 'hours', label: 'Hours & Holidays' },
+  { id: 'pricing', label: 'Booking & Pricing' },
   { id: 'branding', label: 'Branding & Settings' },
   { id: 'admins', label: 'Admins', superAdminOnly: true },
   { id: 'danger', label: 'Danger Zone', superAdminOnly: true },
@@ -137,6 +147,7 @@ export default function AdminPage() {
             {activeTab === 'courts' && <CourtsTab />}
             {activeTab === 'blocks' && <BlockSlotsTab />}
             {activeTab === 'hours' && <HoursTab />}
+            {activeTab === 'pricing' && <PricingTab />}
             {activeTab === 'branding' && <BrandingTab />}
             {activeTab === 'admins' && isSuperAdmin && <AdminsTab />}
             {activeTab === 'danger' && isSuperAdmin && <DangerZoneTab />}

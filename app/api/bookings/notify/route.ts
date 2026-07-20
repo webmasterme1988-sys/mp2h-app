@@ -1,38 +1,43 @@
 import { NextResponse, type NextRequest } from 'next/server';
 import { createPublicServerClient } from '@/lib/supabase/publicServerClient';
 import { getMailTransporter } from '@/lib/mailer';
+import { formatPrice } from '@/lib/priceTiers';
 
 interface NotifyBookingRow {
   id: string;
   player_name: string;
   player_phone: string;
+  player_email: string | null;
   start_time: string;
   status: string;
   receipt_url: string | null;
+  price: number | null;
   courts: { name: string } | null;
 }
 
 export async function POST(request: NextRequest) {
-  const { bookingId } = (await request.json().catch(() => ({}))) as { bookingId?: string };
+  const { bookingIds } = (await request.json().catch(() => ({}))) as { bookingIds?: string[] };
 
-  if (!bookingId) {
-    return NextResponse.json({ error: 'Missing bookingId.' }, { status: 400 });
+  if (!bookingIds || bookingIds.length === 0) {
+    return NextResponse.json({ error: 'Missing bookingIds.' }, { status: 400 });
   }
 
-  // Re-fetch the booking server-side instead of trusting whatever the
-  // client claims it booked — ties every email to a real row rather than
+  // Re-fetch the bookings server-side instead of trusting whatever the
+  // client claims it booked — ties every email to real rows rather than
   // letting arbitrary POSTs put fabricated text in your inbox.
   const supabase = createPublicServerClient();
   const { data, error } = await supabase
     .from('bookings')
-    .select('id, player_name, player_phone, start_time, status, receipt_url, courts(name)')
-    .eq('id', bookingId)
-    .maybeSingle();
+    .select(
+      'id, player_name, player_phone, player_email, start_time, status, receipt_url, price, courts(name)'
+    )
+    .in('id', bookingIds)
+    .order('start_time', { ascending: true });
 
-  const booking = data as unknown as NotifyBookingRow | null;
+  const bookings = data as unknown as NotifyBookingRow[] | null;
 
-  if (error || !booking) {
-    return NextResponse.json({ error: 'Booking not found.' }, { status: 404 });
+  if (error || !bookings || bookings.length === 0) {
+    return NextResponse.json({ error: 'Booking(s) not found.' }, { status: 404 });
   }
 
   const to = process.env.ADMIN_NOTIFICATION_EMAIL || process.env.GMAIL_USER;
@@ -48,36 +53,66 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: 'Notifications are not configured yet.' }, { status: 500 });
   }
 
-  const courtName = booking.courts?.name ?? 'a court';
+  const first = bookings[0];
+  const courtName = first.courts?.name ?? 'a court';
   // Must pin the timezone explicitly — this runs on the server (Vercel's
   // Node.js functions default to UTC), not in the customer's or admin's
   // browser, so leaving it implicit silently shows UTC instead of the
   // Philippine time the slot was actually booked for.
-  const when = new Date(booking.start_time).toLocaleString('en-US', {
-    dateStyle: 'medium',
-    timeStyle: 'short',
-    timeZone: 'Asia/Manila',
-  });
+  const formatWhen = (iso: string) =>
+    new Date(iso).toLocaleString('en-US', {
+      dateStyle: 'medium',
+      timeStyle: 'short',
+      timeZone: 'Asia/Manila',
+    });
 
-  const receiptExt = booking.receipt_url?.split('.').pop()?.split(/[?#]/)[0] || 'jpg';
+  const hasPrices = bookings.some((b) => b.price !== null);
+  const total = bookings.reduce((sum, b) => sum + (b.price ?? 0), 0);
+
+  const slotLines =
+    bookings.length > 1
+      ? bookings.map((b) => {
+          const time = new Date(b.start_time).toLocaleString('en-US', {
+            timeStyle: 'short',
+            timeZone: 'Asia/Manila',
+          });
+          return `  - ${time}${hasPrices ? ` (${formatPrice(b.price ?? 0)})` : ''}`;
+        })
+      : [];
+
+  const receiptExt = first.receipt_url?.split('.').pop()?.split(/[?#]/)[0] || 'jpg';
+
+  const subject =
+    bookings.length > 1
+      ? `New booking: ${first.player_name} — ${courtName} (${bookings.length} slots)`
+      : `New booking: ${first.player_name} — ${courtName}`;
 
   try {
     await transporter.sendMail({
       from: process.env.GMAIL_USER,
       to,
-      subject: `New booking: ${booking.player_name} — ${courtName}`,
+      subject,
       text: [
-        `${booking.player_name} (${booking.player_phone}) just booked ${courtName}.`,
-        `When: ${when} (Philippine time)`,
-        `Status: ${booking.status}`,
-        booking.receipt_url ? 'Receipt: attached to this email.' : 'Receipt: not uploaded.',
+        `${first.player_name} (${first.player_phone}${
+          first.player_email ? `, ${first.player_email}` : ''
+        }) just booked ${courtName}${bookings.length > 1 ? ` (${bookings.length} slots)` : ''}.`,
+        bookings.length > 1
+          ? `Date: ${formatWhen(first.start_time).split(',').slice(0, 2).join(',')} (Philippine time)`
+          : `When: ${formatWhen(first.start_time)} (Philippine time)`,
+        ...slotLines,
+        hasPrices ? `Total: ${formatPrice(total)}` : '',
+        `Status: ${first.status}`,
+        first.receipt_url ? 'Receipt: attached to this email.' : 'Receipt: not uploaded.',
         '',
         'Review and approve it in the admin dashboard.',
-      ].join('\n'),
+      ]
+        .filter(Boolean)
+        .join('\n'),
       // nodemailer fetches the file itself when `path` is an http(s) URL —
-      // no need to download it ourselves first.
-      attachments: booking.receipt_url
-        ? [{ filename: `receipt.${receiptExt}`, path: booking.receipt_url }]
+      // no need to download it ourselves first. All slots in one
+      // submission share the same receipt, so one attachment covers them.
+      attachments: first.receipt_url
+        ? [{ filename: `receipt.${receiptExt}`, path: first.receipt_url }]
         : undefined,
     });
   } catch (err) {

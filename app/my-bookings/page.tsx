@@ -1,7 +1,8 @@
 'use client';
 
-import { useState, type FormEvent } from 'react';
+import { useState, useEffect, type FormEvent } from 'react';
 import { supabase } from '@/lib/supabase';
+import { fetchSiteSettings, DEFAULT_SITE_SETTINGS, type SiteSettings } from '@/lib/siteSettings';
 
 // ---------- Types ----------
 
@@ -44,12 +45,17 @@ const STATUS_LABELS: Record<BookingStatus, string> = {
 // ---------- Component ----------
 
 export default function MyBookingsPage() {
+  const [settings, setSettings] = useState<SiteSettings>(DEFAULT_SITE_SETTINGS);
   const [phone, setPhone] = useState('');
   const [searched, setSearched] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [bookings, setBookings] = useState<Booking[]>([]);
   const [receiptModalUrl, setReceiptModalUrl] = useState<string | null>(null);
+
+  useEffect(() => {
+    fetchSiteSettings(supabase).then(setSettings);
+  }, []);
 
   async function handleSearch(e: FormEvent) {
     e.preventDefault();
@@ -80,10 +86,16 @@ export default function MyBookingsPage() {
 
   return (
     <div className="min-h-screen bg-slate-50">
-      <header className="bg-emerald-700 text-white">
-        <div className="max-w-3xl mx-auto px-4 py-6 text-center">
+      <header style={{ backgroundColor: settings.primary_color }} className="text-white">
+        <div className="max-w-3xl mx-auto px-4 py-6 text-center relative">
+          <a
+            href="/"
+            className="absolute left-4 top-6 text-sm text-white/80 hover:text-white underline underline-offset-2"
+          >
+            ← Back
+          </a>
           <h1 className="text-2xl sm:text-3xl font-bold tracking-tight">My Bookings</h1>
-          <p className="mt-1 text-emerald-100 text-sm sm:text-base">
+          <p className="mt-1 text-white/80 text-sm sm:text-base">
             Enter the phone number you booked with to see your booking history.
           </p>
         </div>
@@ -103,7 +115,8 @@ export default function MyBookingsPage() {
             <button
               type="submit"
               disabled={loading}
-              className="rounded-xl bg-emerald-600 text-white font-medium px-6 py-2.5 text-sm hover:bg-emerald-700 disabled:opacity-60 disabled:cursor-not-allowed transition-colors"
+              style={{ backgroundColor: settings.primary_color }}
+              className="rounded-xl text-white font-medium px-6 py-2.5 text-sm hover:brightness-90 disabled:opacity-60 disabled:cursor-not-allowed transition-[filter]"
             >
               {loading ? 'Searching…' : 'View My Bookings'}
             </button>

@@ -15,13 +15,41 @@ export default function SetPasswordPage() {
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
 
-  // The invite link's tokens live in the URL fragment (#access_token=...),
-  // which only the browser sees. supabase-js parses it automatically on
-  // load and establishes a temporary session — we just wait for that.
+  // The invite link's tokens live in the URL fragment (#access_token=...).
+  // @supabase/ssr's browser client hardcodes flowType: 'pkce' with no way to
+  // opt out, but admin-issued invite links can never be PKCE (the browser
+  // accepting the invite isn't the one that sent it, so there's no shared
+  // code verifier) — Supabase's own docs say so. The client's automatic
+  // detectSessionInUrl handling chokes on that mismatch and silently drops
+  // the session. So we parse the hash ourselves and call setSession()
+  // directly, which doesn't care about flow type.
   useEffect(() => {
-    supabase.auth.getUser().then(({ data: { user } }) => {
+    async function establishSession() {
+      const hash = window.location.hash.startsWith('#')
+        ? window.location.hash.slice(1)
+        : window.location.hash;
+      const params = new URLSearchParams(hash);
+      const accessToken = params.get('access_token');
+      const refreshToken = params.get('refresh_token');
+
+      if (accessToken && refreshToken) {
+        const { data } = await supabase.auth.setSession({
+          access_token: accessToken,
+          refresh_token: refreshToken,
+        });
+        // Drop the tokens from the visible URL now that they're consumed.
+        window.history.replaceState(null, '', window.location.pathname);
+        setSessionState(data.session ? 'ready' : 'invalid');
+        return;
+      }
+
+      // No tokens in the URL (e.g. a page refresh) — fall back to whatever
+      // session cookie may already exist.
+      const { data: { user } } = await supabase.auth.getUser();
       setSessionState(user ? 'ready' : 'invalid');
-    });
+    }
+
+    establishSession();
   }, []);
 
   async function handleSubmit(e: FormEvent) {

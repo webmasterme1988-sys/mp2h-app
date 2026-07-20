@@ -3,66 +3,27 @@
 import { useState, useEffect, useCallback } from 'react';
 import { supabase } from '@/lib/supabase';
 import DateCalendar from '@/components/DateCalendar';
+import { TIME_SLOTS, todayISODate, type TimeSlot } from '@/lib/timeSlots';
+import { fetchSiteSettings, DEFAULT_SITE_SETTINGS, type SiteSettings } from '@/lib/siteSettings';
 
 // ---------- Types ----------
 
 interface Court {
-  id: number;
+  id: string;
   name: string;
-}
-
-interface TimeSlot {
-  hour: number; // 24h start hour, e.g. 6 = 6:00 AM
-  label: string; // "6:00 AM"
-  startISO: (date: string) => string;
-  endISO: (date: string) => string;
 }
 
 type SubmitState = 'idle' | 'uploading' | 'saving' | 'success' | 'error';
 
-// ---------- Constants ----------
-
-const START_HOUR = 6; // 6:00 AM
-const END_HOUR = 22; // last slot START time is 9:00 PM, ending at 10:00 PM
-
-function formatHourLabel(hour: number) {
-  const period = hour >= 12 ? 'PM' : 'AM';
-  let displayHour = hour % 12;
-  if (displayHour === 0) displayHour = 12;
-  return `${displayHour}:00 ${period}`;
-}
-
-function buildTimeSlots(): TimeSlot[] {
-  const slots: TimeSlot[] = [];
-  for (let hour = START_HOUR; hour < END_HOUR; hour++) {
-    slots.push({
-      hour,
-      label: `${formatHourLabel(hour)} - ${formatHourLabel(hour + 1)}`,
-      startISO: (date: string) =>
-        new Date(`${date}T${String(hour).padStart(2, '0')}:00:00`).toISOString(),
-      endISO: (date: string) =>
-        new Date(`${date}T${String(hour + 1).padStart(2, '0')}:00:00`).toISOString(),
-    });
-  }
-  return slots;
-}
-
-const TIME_SLOTS = buildTimeSlots();
-
-function todayISODate() {
-  const now = new Date();
-  const offset = now.getTimezoneOffset();
-  const local = new Date(now.getTime() - offset * 60 * 1000);
-  return local.toISOString().split('T')[0];
-}
-
 // ---------- Component ----------
 
 export default function Home() {
+  const [settings, setSettings] = useState<SiteSettings>(DEFAULT_SITE_SETTINGS);
   const [courts, setCourts] = useState<Court[]>([]);
-  const [selectedCourtId, setSelectedCourtId] = useState<number | null>(null);
+  const [selectedCourtId, setSelectedCourtId] = useState<string | null>(null);
   const [selectedDate, setSelectedDate] = useState<string>(todayISODate());
   const [bookedStartTimes, setBookedStartTimes] = useState<Set<number>>(new Set());
+  const [blockedStartTimes, setBlockedStartTimes] = useState<Set<number>>(new Set());
   const [loadingSlots, setLoadingSlots] = useState(false);
   const [slotsError, setSlotsError] = useState<string | null>(null);
 
@@ -76,6 +37,12 @@ export default function Home() {
 
   const [submitState, setSubmitState] = useState<SubmitState>('idle');
   const [submitError, setSubmitError] = useState<string | null>(null);
+
+  // ---------- Load site branding ----------
+
+  useEffect(() => {
+    fetchSiteSettings(supabase).then(setSettings);
+  }, []);
 
   // ---------- Load courts ----------
 
@@ -105,25 +72,48 @@ export default function Home() {
     const dayStart = new Date(`${selectedDate}T00:00:00`).toISOString();
     const dayEnd = new Date(`${selectedDate}T23:59:59`).toISOString();
 
-    const { data, error } = await supabase
-      .from('bookings')
-      .select('start_time')
-      .eq('court_id', selectedCourtId)
-      .gte('start_time', dayStart)
-      .lte('start_time', dayEnd)
-      .in('status', ['pending', 'confirmed']);
+    const [bookingsResult, blockedResult] = await Promise.all([
+      supabase
+        .from('bookings')
+        .select('start_time')
+        .eq('court_id', selectedCourtId)
+        .gte('start_time', dayStart)
+        .lte('start_time', dayEnd)
+        .in('status', ['pending', 'confirmed']),
+      supabase
+        .from('blocked_slots')
+        .select('start_time')
+        .eq('court_id', selectedCourtId)
+        .gte('start_time', dayStart)
+        .lte('start_time', dayEnd),
+    ]);
 
-    if (error) {
-      console.error('Failed to load bookings:', error);
+    if (bookingsResult.error) {
+      console.error('Failed to load bookings:', bookingsResult.error);
       setSlotsError('Could not load availability. Please refresh.');
       setLoadingSlots(false);
       return;
     }
 
+    // Blocked slots are a secondary concern — if that table isn't set up
+    // yet (or the query fails for any reason), fall back to "nothing
+    // blocked" instead of breaking the whole booking page.
+    if (blockedResult.error) {
+      console.error('Failed to load blocked slots:', blockedResult.error);
+    }
+
     const bookedSet = new Set<number>(
-      (data ?? []).map((row: { start_time: string }) => new Date(row.start_time).getTime())
+      (bookingsResult.data ?? []).map((row: { start_time: string }) =>
+        new Date(row.start_time).getTime()
+      )
+    );
+    const blockedSet = new Set<number>(
+      (blockedResult.data ?? []).map((row: { start_time: string }) =>
+        new Date(row.start_time).getTime()
+      )
     );
     setBookedStartTimes(bookedSet);
+    setBlockedStartTimes(blockedSet);
     setLoadingSlots(false);
   }, [selectedCourtId, selectedDate]);
 
@@ -138,8 +128,13 @@ export default function Home() {
     return bookedStartTimes.has(t);
   }
 
+  function isSlotBlocked(slot: TimeSlot) {
+    const t = new Date(slot.startISO(selectedDate)).getTime();
+    return blockedStartTimes.has(t);
+  }
+
   function handleSlotClick(slot: TimeSlot) {
-    if (isSlotBooked(slot)) return;
+    if (isSlotBooked(slot) || isSlotBlocked(slot)) return;
     setSelectedSlot(slot);
     setPlayerName('');
     setPlayerPhone('');
@@ -246,18 +241,24 @@ export default function Home() {
   return (
     <div className="min-h-screen bg-slate-50">
       {/* Header */}
-      <header className="bg-emerald-700 text-white">
+      <header style={{ backgroundColor: settings.primary_color }} className="text-white">
         <div className="max-w-3xl mx-auto px-4 py-6 text-center relative">
           <a
             href="/my-bookings"
-            className="absolute right-4 top-6 text-sm text-emerald-100 hover:text-white underline underline-offset-2"
+            className="absolute right-4 top-6 text-sm text-white/80 hover:text-white underline underline-offset-2"
           >
             My Bookings
           </a>
-          <h1 className="text-2xl sm:text-3xl font-bold tracking-tight">MP2H Pickleball</h1>
-          <p className="mt-1 text-emerald-100 text-sm sm:text-base">
-            Book a court online — quick, easy, and no phone calls needed.
-          </p>
+          {settings.logo_url && (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img
+              src={settings.logo_url}
+              alt={settings.site_title}
+              className="h-12 w-auto mx-auto mb-2 object-contain"
+            />
+          )}
+          <h1 className="text-2xl sm:text-3xl font-bold tracking-tight">{settings.site_title}</h1>
+          <p className="mt-1 text-white/80 text-sm sm:text-base">{settings.site_subtitle}</p>
         </div>
       </header>
 
@@ -273,19 +274,27 @@ export default function Home() {
                 {courts.length === 0 && (
                   <span className="text-sm text-slate-400">Loading courts…</span>
                 )}
-                {courts.map((court) => (
-                  <button
-                    key={court.id}
-                    onClick={() => setSelectedCourtId(court.id)}
-                    className={`flex-1 rounded-xl border px-4 py-2.5 text-sm font-medium transition-colors ${
-                      selectedCourtId === court.id
-                        ? 'bg-emerald-600 border-emerald-600 text-white'
-                        : 'bg-white border-slate-300 text-slate-700 hover:border-emerald-400'
-                    }`}
-                  >
-                    {court.name}
-                  </button>
-                ))}
+                {courts.map((court) => {
+                  const isSelected = selectedCourtId === court.id;
+                  return (
+                    <button
+                      key={court.id}
+                      onClick={() => setSelectedCourtId(court.id)}
+                      style={
+                        isSelected
+                          ? { backgroundColor: settings.primary_color, borderColor: settings.primary_color }
+                          : undefined
+                      }
+                      className={`flex-1 rounded-xl border px-4 py-2.5 text-sm font-medium transition-colors ${
+                        isSelected
+                          ? 'text-white'
+                          : 'bg-white border-slate-300 text-slate-700 hover:border-emerald-400'
+                      }`}
+                    >
+                      {court.name}
+                    </button>
+                  );
+                })}
               </div>
             </div>
 
@@ -295,6 +304,7 @@ export default function Home() {
                 selectedDate={selectedDate}
                 minDate={todayISODate()}
                 onSelect={setSelectedDate}
+                accentColor={settings.primary_color}
               />
             </div>
           </div>
@@ -314,18 +324,21 @@ export default function Home() {
             <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5">
               {TIME_SLOTS.map((slot) => {
                 const booked = isSlotBooked(slot);
+                const blocked = isSlotBlocked(slot);
                 return (
                   <button
                     key={slot.hour}
-                    disabled={booked}
+                    disabled={booked || blocked}
                     onClick={() => handleSlotClick(slot)}
                     className={`rounded-xl border px-3 py-3 text-sm font-medium text-center transition-colors ${
                       booked
                         ? 'bg-slate-100 border-slate-200 text-slate-400 cursor-not-allowed line-through'
+                        : blocked
+                        ? 'bg-slate-50 border-slate-200 text-slate-400 cursor-not-allowed'
                         : 'bg-white border-slate-300 text-slate-700 hover:bg-emerald-50 hover:border-emerald-400 active:scale-[0.98]'
                     }`}
                   >
-                    {slot.label}
+                    {blocked ? 'Unavailable' : slot.label}
                   </button>
                 );
               })}
@@ -340,6 +353,10 @@ export default function Home() {
             <span className="flex items-center gap-1.5">
               <span className="w-3 h-3 rounded bg-slate-100 border border-slate-200 inline-block" />
               Booked
+            </span>
+            <span className="flex items-center gap-1.5">
+              <span className="w-3 h-3 rounded bg-slate-50 border border-slate-200 inline-block" />
+              Unavailable
             </span>
           </div>
         </section>
@@ -404,10 +421,9 @@ export default function Home() {
                   {/* GCash QR */}
                   <div className="rounded-xl bg-slate-50 border border-slate-200 p-4 text-center">
                     <p className="text-sm font-medium text-slate-700 mb-2">Pay via GCash</p>
-                    {/* Replace /gcash-qr.png in /public with your actual QR code image */}
                     <img
-                      src="/gcash-qr.png"
-                      alt="MP2H GCash QR Code"
+                      src={settings.gcash_qr_url ?? '/gcash-qr.png'}
+                      alt="GCash QR Code"
                       className="mx-auto w-40 h-40 object-contain rounded-lg border border-slate-200 bg-white"
                     />
                     <p className="text-xs text-slate-500 mt-2">
@@ -440,13 +456,14 @@ export default function Home() {
                   <button
                     onClick={handleSubmitBooking}
                     disabled={submitState === 'uploading' || submitState === 'saving'}
-                    className="w-full rounded-xl bg-emerald-600 text-white font-medium py-3 text-sm hover:bg-emerald-700 disabled:opacity-60 disabled:cursor-not-allowed transition-colors"
+                    style={{ backgroundColor: settings.primary_color }}
+                    className="w-full rounded-xl text-white font-medium py-3 text-sm hover:brightness-90 disabled:opacity-60 disabled:cursor-not-allowed transition-[filter]"
                   >
                     {submitState === 'uploading'
                       ? 'Uploading receipt…'
                       : submitState === 'saving'
                       ? 'Saving booking…'
-                      : 'Submit Booking'}
+                      : settings.submit_button_label}
                   </button>
                 </>
               )}

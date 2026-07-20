@@ -6,6 +6,7 @@ interface DateCalendarProps {
   selectedDate: string; // 'YYYY-MM-DD'
   minDate: string; // 'YYYY-MM-DD'
   onSelect: (date: string) => void;
+  accentColor?: string; // defaults to emerald-600, override for branded pages
 }
 
 const WEEKDAY_LABELS = ['S', 'M', 'T', 'W', 'T', 'F', 'S'];
@@ -23,7 +24,12 @@ function parseISODate(iso: string) {
   return { year, month: month - 1, day };
 }
 
-export default function DateCalendar({ selectedDate, minDate, onSelect }: DateCalendarProps) {
+export default function DateCalendar({
+  selectedDate,
+  minDate,
+  onSelect,
+  accentColor,
+}: DateCalendarProps) {
   const initial = parseISODate(selectedDate);
   const [viewYear, setViewYear] = useState(initial.year);
   const [viewMonth, setViewMonth] = useState(initial.month);
@@ -100,9 +106,12 @@ export default function DateCalendar({ selectedDate, minDate, onSelect }: DateCa
               type="button"
               disabled={isDisabled}
               onClick={() => onSelect(iso)}
+              style={isSelected && accentColor ? { backgroundColor: accentColor } : undefined}
               className={`aspect-square rounded-lg text-sm transition-colors ${
                 isSelected
-                  ? 'bg-emerald-600 text-white font-semibold'
+                  ? accentColor
+                    ? 'text-white font-semibold'
+                    : 'bg-emerald-600 text-white font-semibold'
                   : isDisabled
                   ? 'text-slate-300 cursor-not-allowed'
                   : 'text-slate-700 hover:bg-emerald-50'

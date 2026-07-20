@@ -1,6 +1,6 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { supabase } from '@/lib/supabase';
 import DateCalendar from '@/components/DateCalendar';
 import { buildTimeSlots, todayISODate } from '@/lib/timeSlots';
@@ -8,6 +8,8 @@ import { fetchSiteSettings, DEFAULT_SITE_SETTINGS, type SiteSettings } from '@/l
 import { fetchHolidays, type Holiday } from '@/lib/holidays';
 
 type BookingStatus = 'pending' | 'confirmed' | 'cancelled';
+type DateFilterMode = 'all' | 'today' | 'week' | 'month' | 'custom';
+type StatusFilter = 'all' | BookingStatus;
 
 interface Booking {
   id: string;
@@ -22,6 +24,11 @@ interface Booking {
   courts: { name: string } | null;
 }
 
+interface Court {
+  id: string;
+  name: string;
+}
+
 function formatDateTime(iso: string) {
   return new Date(iso).toLocaleString('en-US', {
     month: 'short',
@@ -30,6 +37,50 @@ function formatDateTime(iso: string) {
     hour: 'numeric',
     minute: '2-digit',
   });
+}
+
+// The slot's calendar date as experienced in the Philippines, not whatever
+// date the raw UTC timestamp happens to fall on (a 6am PHT slot is still
+// the previous day in UTC) — same class of bug fixed for the email
+// notification's displayed time.
+function bookingDatePH(iso: string) {
+  return new Date(iso).toLocaleDateString('en-CA', { timeZone: 'Asia/Manila' });
+}
+
+function toISODateLocal(date: Date) {
+  return date.toLocaleDateString('en-CA');
+}
+
+function todayPH() {
+  return new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Manila' });
+}
+
+// "Today"/"This Week"/"This Month" are anchored to the Philippines' current
+// date regardless of what timezone the admin's own browser happens to be
+// in (e.g. checking the dashboard while traveling), then computed with
+// plain local-timezone calendar math from that anchor.
+function getPresetRange(mode: DateFilterMode): { from: string; to: string } {
+  const todayStr = todayPH();
+  if (mode === 'today') return { from: todayStr, to: todayStr };
+
+  const [y, m, d] = todayStr.split('-').map(Number);
+  const anchor = new Date(y, m - 1, d);
+
+  if (mode === 'week') {
+    const sunday = new Date(anchor);
+    sunday.setDate(anchor.getDate() - anchor.getDay());
+    const saturday = new Date(sunday);
+    saturday.setDate(sunday.getDate() + 6);
+    return { from: toISODateLocal(sunday), to: toISODateLocal(saturday) };
+  }
+
+  if (mode === 'month') {
+    const first = new Date(y, m - 1, 1);
+    const last = new Date(y, m, 0);
+    return { from: toISODateLocal(first), to: toISODateLocal(last) };
+  }
+
+  return { from: '', to: '' };
 }
 
 const STATUS_STYLES: Record<BookingStatus, string> = {
@@ -43,15 +94,72 @@ export default function BookingsTab() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [updatingId, setUpdatingId] = useState<string | null>(null);
+  const [actionError, setActionError] = useState<{ bookingId: string; message: string } | null>(
+    null
+  );
   const [receiptModalUrl, setReceiptModalUrl] = useState<string | null>(null);
   const [settings, setSettings] = useState<SiteSettings>(DEFAULT_SITE_SETTINGS);
   const [holidays, setHolidays] = useState<Holiday[]>([]);
   const [now, setNow] = useState(() => Date.now());
+  const [courts, setCourts] = useState<Court[]>([]);
+
+  // ---------- Filters ----------
+  const [dateFilterMode, setDateFilterMode] = useState<DateFilterMode>('all');
+  const [customDateFrom, setCustomDateFrom] = useState('');
+  const [customDateTo, setCustomDateTo] = useState('');
+  const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
+  const [courtFilter, setCourtFilter] = useState<string>('all');
+  const [phoneSearch, setPhoneSearch] = useState('');
 
   useEffect(() => {
     fetchSiteSettings(supabase).then(setSettings);
     fetchHolidays(supabase).then(setHolidays);
+    supabase
+      .from('courts')
+      .select('id, name')
+      .order('id')
+      .then(({ data, error }) => {
+        if (error) {
+          console.error('Failed to load courts:', error);
+          return;
+        }
+        setCourts((data ?? []) as Court[]);
+      });
   }, []);
+
+  const filteredBookings = useMemo(() => {
+    const range =
+      dateFilterMode === 'custom'
+        ? { from: customDateFrom, to: customDateTo }
+        : getPresetRange(dateFilterMode);
+    const phoneQuery = phoneSearch.trim().toLowerCase();
+
+    return bookings.filter((b) => {
+      if (statusFilter !== 'all' && b.status !== statusFilter) return false;
+      if (courtFilter !== 'all' && b.court_id !== courtFilter) return false;
+      if (phoneQuery && !b.player_phone.toLowerCase().includes(phoneQuery)) return false;
+
+      if (range.from || range.to) {
+        const bookingDate = bookingDatePH(b.start_time);
+        if (range.from && bookingDate < range.from) return false;
+        if (range.to && bookingDate > range.to) return false;
+      }
+
+      return true;
+    });
+  }, [bookings, dateFilterMode, customDateFrom, customDateTo, statusFilter, courtFilter, phoneSearch]);
+
+  function clearFilters() {
+    setDateFilterMode('all');
+    setCustomDateFrom('');
+    setCustomDateTo('');
+    setStatusFilter('all');
+    setCourtFilter('all');
+    setPhoneSearch('');
+  }
+
+  const filtersActive =
+    dateFilterMode !== 'all' || statusFilter !== 'all' || courtFilter !== 'all' || phoneSearch.trim() !== '';
 
   // Keeps the "hold expired" indicator live without needing a manual refresh.
   useEffect(() => {
@@ -101,11 +209,52 @@ export default function BookingsTab() {
 
   async function updateStatus(bookingId: string, status: BookingStatus) {
     setUpdatingId(bookingId);
+    setActionError(null);
+
+    // Approving a booking (whether it's pending or a previously-rejected
+    // one being un-cancelled) can double-book a slot that's since been
+    // confirmed for someone else — e.g. its hold expired and another
+    // customer got approved first, or it was rejected and the slot was
+    // re-booked. Check right before committing rather than trusting the
+    // stale list already in memory.
+    if (status === 'confirmed') {
+      const booking = bookings.find((b) => b.id === bookingId);
+      if (booking) {
+        const { data: conflicts, error: conflictCheckError } = await supabase
+          .from('bookings')
+          .select('id')
+          .eq('court_id', booking.court_id)
+          .eq('start_time', booking.start_time)
+          .eq('status', 'confirmed')
+          .neq('id', bookingId);
+
+        if (conflictCheckError) {
+          console.error('Failed to check for slot conflicts:', conflictCheckError);
+          setActionError({
+            bookingId,
+            message: 'Could not verify slot availability. Please try again.',
+          });
+          setUpdatingId(null);
+          return;
+        }
+
+        if (conflicts && conflicts.length > 0) {
+          setActionError({
+            bookingId,
+            message:
+              'This slot is already confirmed for another booking. Reject this one, or reschedule it instead.',
+          });
+          setUpdatingId(null);
+          return;
+        }
+      }
+    }
 
     const { error } = await supabase.from('bookings').update({ status }).eq('id', bookingId);
 
     if (error) {
       console.error(`Failed to set booking ${bookingId} to ${status}:`, error);
+      setActionError({ bookingId, message: `Could not update status: ${error.message}` });
       setUpdatingId(null);
       return;
     }
@@ -225,7 +374,104 @@ export default function BookingsTab() {
   }
 
   return (
-    <>
+    <div className="space-y-6">
+      <section className="bg-white rounded-2xl shadow-sm border border-slate-200 p-4 sm:p-6">
+        <div className="flex items-center justify-between mb-3">
+          <h2 className="text-lg font-semibold text-slate-800">Filters</h2>
+          {filtersActive && (
+            <button
+              onClick={clearFilters}
+              className="text-xs text-emerald-700 hover:text-emerald-800 underline underline-offset-2"
+            >
+              Clear filters
+            </button>
+          )}
+        </div>
+
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
+          <div>
+            <label className="block text-xs font-medium text-slate-500 mb-1">Date</label>
+            <select
+              value={dateFilterMode}
+              onChange={(e) => setDateFilterMode(e.target.value as DateFilterMode)}
+              className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
+            >
+              <option value="all">All dates</option>
+              <option value="today">Today</option>
+              <option value="week">This week</option>
+              <option value="month">This month</option>
+              <option value="custom">Custom range…</option>
+            </select>
+          </div>
+
+          <div>
+            <label className="block text-xs font-medium text-slate-500 mb-1">Status</label>
+            <select
+              value={statusFilter}
+              onChange={(e) => setStatusFilter(e.target.value as StatusFilter)}
+              className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
+            >
+              <option value="all">All statuses</option>
+              <option value="pending">Pending</option>
+              <option value="confirmed">Confirmed</option>
+              <option value="cancelled">Cancelled</option>
+            </select>
+          </div>
+
+          <div>
+            <label className="block text-xs font-medium text-slate-500 mb-1">Court</label>
+            <select
+              value={courtFilter}
+              onChange={(e) => setCourtFilter(e.target.value)}
+              className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
+            >
+              <option value="all">All courts</option>
+              {courts.map((court) => (
+                <option key={court.id} value={court.id}>
+                  {court.name}
+                </option>
+              ))}
+            </select>
+          </div>
+
+          <div>
+            <label className="block text-xs font-medium text-slate-500 mb-1">
+              Search phone number
+            </label>
+            <input
+              type="text"
+              value={phoneSearch}
+              onChange={(e) => setPhoneSearch(e.target.value)}
+              placeholder="e.g. 0917"
+              className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
+            />
+          </div>
+        </div>
+
+        {dateFilterMode === 'custom' && (
+          <div className="grid grid-cols-2 gap-3 mt-3 max-w-sm">
+            <div>
+              <label className="block text-xs font-medium text-slate-500 mb-1">From</label>
+              <input
+                type="date"
+                value={customDateFrom}
+                onChange={(e) => setCustomDateFrom(e.target.value)}
+                className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-slate-500 mb-1">To</label>
+              <input
+                type="date"
+                value={customDateTo}
+                onChange={(e) => setCustomDateTo(e.target.value)}
+                className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
+              />
+            </div>
+          </div>
+        )}
+      </section>
+
       <section className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
         {error && <p className="text-sm text-red-600 px-4 sm:px-6 pt-4">{error}</p>}
 
@@ -233,6 +479,10 @@ export default function BookingsTab() {
           <p className="text-sm text-slate-400 px-4 sm:px-6 py-6">Loading bookings…</p>
         ) : bookings.length === 0 ? (
           <p className="text-sm text-slate-400 px-4 sm:px-6 py-6">No bookings yet.</p>
+        ) : filteredBookings.length === 0 ? (
+          <p className="text-sm text-slate-400 px-4 sm:px-6 py-6">
+            No bookings match your filters.
+          </p>
         ) : (
           <div className="overflow-x-auto">
             <table className="w-full text-sm">
@@ -248,7 +498,7 @@ export default function BookingsTab() {
                 </tr>
               </thead>
               <tbody>
-                {bookings.map((booking) => {
+                {filteredBookings.map((booking) => {
                   const isUpdating = updatingId === booking.id;
                   return (
                     <tr key={booking.id} className="border-b border-slate-100 last:border-0">
@@ -291,8 +541,8 @@ export default function BookingsTab() {
                           <span className="text-slate-300">—</span>
                         )}
                       </td>
-                      <td className="px-4 sm:px-6 py-3 whitespace-nowrap">
-                        <div className="flex gap-2">
+                      <td className="px-4 sm:px-6 py-3">
+                        <div className="flex gap-2 whitespace-nowrap">
                           <button
                             onClick={() => updateStatus(booking.id, 'confirmed')}
                             disabled={isUpdating || booking.status === 'confirmed'}
@@ -317,6 +567,11 @@ export default function BookingsTab() {
                             </button>
                           )}
                         </div>
+                        {actionError?.bookingId === booking.id && (
+                          <p className="text-xs text-red-600 mt-1.5 max-w-xs whitespace-normal">
+                            {actionError.message}
+                          </p>
+                        )}
                       </td>
                     </tr>
                   );
@@ -432,6 +687,6 @@ export default function BookingsTab() {
           </div>
         </div>
       )}
-    </>
+    </div>
   );
 }

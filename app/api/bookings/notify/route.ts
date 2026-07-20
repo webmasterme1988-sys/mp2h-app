@@ -49,9 +49,14 @@ export async function POST(request: NextRequest) {
   }
 
   const courtName = booking.courts?.name ?? 'a court';
+  // Must pin the timezone explicitly — this runs on the server (Vercel's
+  // Node.js functions default to UTC), not in the customer's or admin's
+  // browser, so leaving it implicit silently shows UTC instead of the
+  // Philippine time the slot was actually booked for.
   const when = new Date(booking.start_time).toLocaleString('en-US', {
     dateStyle: 'medium',
     timeStyle: 'short',
+    timeZone: 'Asia/Manila',
   });
 
   const receiptExt = booking.receipt_url?.split('.').pop()?.split(/[?#]/)[0] || 'jpg';
@@ -63,7 +68,7 @@ export async function POST(request: NextRequest) {
       subject: `New booking: ${booking.player_name} — ${courtName}`,
       text: [
         `${booking.player_name} (${booking.player_phone}) just booked ${courtName}.`,
-        `When: ${when}`,
+        `When: ${when} (Philippine time)`,
         `Status: ${booking.status}`,
         booking.receipt_url ? 'Receipt: attached to this email.' : 'Receipt: not uploaded.',
         '',

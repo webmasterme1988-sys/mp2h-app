@@ -7,6 +7,7 @@ import { buildTimeSlots, todayISODate, type TimeSlot } from '@/lib/timeSlots';
 import { type SiteSettings } from '@/lib/siteSettings';
 import { type PaymentQrCode } from '@/lib/paymentQrCodes';
 import { type Holiday } from '@/lib/holidays';
+import { compressImage } from '@/lib/compressImage';
 
 // ---------- Types ----------
 
@@ -52,6 +53,7 @@ export default function BookingPageClient({
   const [playerPhone, setPlayerPhone] = useState('');
   const [receiptFile, setReceiptFile] = useState<File | null>(null);
   const [receiptPreview, setReceiptPreview] = useState<string | null>(null);
+  const [compressingReceipt, setCompressingReceipt] = useState(false);
 
   const [submitState, setSubmitState] = useState<SubmitState>('idle');
   const [submitError, setSubmitError] = useState<string | null>(null);
@@ -223,14 +225,21 @@ export default function BookingPageClient({
     setSelectedSlot(null);
   }
 
-  function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
+  async function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
     const file = e.target.files?.[0] ?? null;
-    setReceiptFile(file);
-    if (file) {
-      setReceiptPreview(URL.createObjectURL(file));
-    } else {
+
+    if (!file) {
+      setReceiptFile(null);
       setReceiptPreview(null);
+      return;
     }
+
+    setCompressingReceipt(true);
+    const compressed = await compressImage(file);
+    setCompressingReceipt(false);
+
+    setReceiptFile(compressed);
+    setReceiptPreview(URL.createObjectURL(compressed));
   }
 
   // ---------- Download QR ----------
@@ -620,8 +629,12 @@ export default function BookingPageClient({
                       type="file"
                       accept="image/*"
                       onChange={handleFileChange}
-                      className="w-full text-sm text-slate-600 file:mr-3 file:rounded-lg file:border-0 file:bg-emerald-50 file:text-emerald-700 file:px-4 file:py-2 file:text-sm file:font-medium hover:file:bg-emerald-100"
+                      disabled={compressingReceipt}
+                      className="w-full text-sm text-slate-600 file:mr-3 file:rounded-lg file:border-0 file:bg-emerald-50 file:text-emerald-700 file:px-4 file:py-2 file:text-sm file:font-medium hover:file:bg-emerald-100 disabled:opacity-60"
                     />
+                    {compressingReceipt && (
+                      <p className="text-xs text-slate-400 mt-1">Optimizing image…</p>
+                    )}
                     {receiptPreview && (
                       <img
                         src={receiptPreview}
@@ -635,7 +648,7 @@ export default function BookingPageClient({
 
                   <button
                     onClick={handleSubmitBooking}
-                    disabled={submitState === 'uploading' || submitState === 'saving'}
+                    disabled={submitState === 'uploading' || submitState === 'saving' || compressingReceipt}
                     style={{ backgroundColor: settings.primary_color }}
                     className="w-full rounded-xl text-white font-medium py-3 text-sm hover:brightness-90 disabled:opacity-60 disabled:cursor-not-allowed transition-[filter]"
                   >

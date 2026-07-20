@@ -247,7 +247,13 @@ export default function Home() {
     <div className="min-h-screen bg-slate-50">
       {/* Header */}
       <header className="bg-emerald-700 text-white">
-        <div className="max-w-3xl mx-auto px-4 py-6 text-center">
+        <div className="max-w-3xl mx-auto px-4 py-6 text-center relative">
+          <a
+            href="/my-bookings"
+            className="absolute right-4 top-6 text-sm text-emerald-100 hover:text-white underline underline-offset-2"
+          >
+            My Bookings
+          </a>
           <h1 className="text-2xl sm:text-3xl font-bold tracking-tight">MP2H Pickleball</h1>
           <p className="mt-1 text-emerald-100 text-sm sm:text-base">
             Book a court online — quick, easy, and no phone calls needed.

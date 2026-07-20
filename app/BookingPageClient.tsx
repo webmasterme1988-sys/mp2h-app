@@ -35,6 +35,7 @@ export default function BookingPageClient({
   const [settings] = useState<SiteSettings>(initialSettings);
   const [qrCodes] = useState<PaymentQrCode[]>(initialQrCodes);
   const [selectedQrIndex, setSelectedQrIndex] = useState(0);
+  const [downloadingQr, setDownloadingQr] = useState(false);
   const [holidays] = useState<Holiday[]>(initialHolidays);
   const [courts, setCourts] = useState<Court[]>([]);
   const [selectedCourtId, setSelectedCourtId] = useState<string | null>(null);
@@ -229,6 +230,37 @@ export default function BookingPageClient({
       setReceiptPreview(URL.createObjectURL(file));
     } else {
       setReceiptPreview(null);
+    }
+  }
+
+  // ---------- Download QR ----------
+  // Lets someone paying from the same phone save the QR to their photo
+  // gallery, so their e-wallet app's "scan from gallery" option can read it
+  // — scanning a QR with the camera while it's displayed on that same
+  // phone's screen usually isn't possible.
+
+  async function handleDownloadQr(url: string, label: string) {
+    setDownloadingQr(true);
+    try {
+      const res = await fetch(url);
+      const blob = await res.blob();
+      const objectUrl = URL.createObjectURL(blob);
+      const ext = blob.type.split('/')[1] || 'png';
+
+      const link = document.createElement('a');
+      link.href = objectUrl;
+      link.download = `${label.toLowerCase().replace(/[^a-z0-9]+/g, '-')}-qr.${ext}`;
+      document.body.appendChild(link);
+      link.click();
+      document.body.removeChild(link);
+      URL.revokeObjectURL(objectUrl);
+    } catch (err) {
+      // Cross-origin fetch can fail (CORS, offline, etc) — fall back to
+      // just opening the image so the user can long-press-save it manually.
+      console.error('QR download failed, opening image instead:', err);
+      window.open(url, '_blank');
+    } finally {
+      setDownloadingQr(false);
     }
   }
 
@@ -549,8 +581,27 @@ export default function BookingPageClient({
                       className="mx-auto w-40 h-40 object-contain rounded-lg border border-slate-200 bg-white"
                     />
 
+                    <button
+                      type="button"
+                      onClick={() =>
+                        handleDownloadQr(
+                          qrCodes[selectedQrIndex]?.image_url ?? '/gcash-qr.png',
+                          qrCodes[selectedQrIndex]?.label ?? 'payment'
+                        )
+                      }
+                      disabled={downloadingQr}
+                      className="mt-2 inline-flex items-center gap-1 text-xs text-emerald-700 hover:text-emerald-800 font-medium underline underline-offset-2 disabled:opacity-60"
+                    >
+                      {downloadingQr ? 'Downloading…' : 'Download QR'}
+                    </button>
+
                     <p className="text-xs text-slate-500 mt-2">
                       Scan to pay, then upload your receipt screenshot below.
+                    </p>
+                    <p className="text-xs text-slate-500 mt-1">
+                      Paying from this phone? Download the QR, then use your e-wallet app&apos;s
+                      &quot;scan from gallery&quot; option — or press and hold the image above to
+                      save it directly.
                     </p>
 
                     {settings.payment_note && (

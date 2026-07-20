@@ -6,18 +6,21 @@ import { supabase } from '@/lib/supabase';
 import BookingsTab from './_components/BookingsTab';
 import CourtsTab from './_components/CourtsTab';
 import BlockSlotsTab from './_components/BlockSlotsTab';
+import HoursTab from './_components/HoursTab';
 import BrandingTab from './_components/BrandingTab';
 import AdminsTab from './_components/AdminsTab';
 import DangerZoneTab from './_components/DangerZoneTab';
+import ChangePasswordModal from './_components/ChangePasswordModal';
 
-type TabId = 'bookings' | 'courts' | 'blocks' | 'branding' | 'admins' | 'danger';
+type TabId = 'bookings' | 'courts' | 'blocks' | 'hours' | 'branding' | 'admins' | 'danger';
 
 const TABS: { id: TabId; label: string; superAdminOnly?: boolean }[] = [
   { id: 'bookings', label: 'Bookings' },
   { id: 'courts', label: 'Courts' },
   { id: 'blocks', label: 'Block Time Slots' },
+  { id: 'hours', label: 'Hours & Holidays' },
   { id: 'branding', label: 'Branding & Settings' },
-  { id: 'admins', label: 'Admins' },
+  { id: 'admins', label: 'Admins', superAdminOnly: true },
   { id: 'danger', label: 'Danger Zone', superAdminOnly: true },
 ];
 
@@ -27,6 +30,7 @@ export default function AdminPage() {
   const [authChecking, setAuthChecking] = useState(true);
   const [isSuperAdmin, setIsSuperAdmin] = useState(false);
   const [activeTab, setActiveTab] = useState<TabId>('bookings');
+  const [changePasswordOpen, setChangePasswordOpen] = useState(false);
 
   // ---------- Auth guard ----------
   // Belt-and-suspenders: proxy.ts already blocks unauthenticated requests to
@@ -84,12 +88,20 @@ export default function AdminPage() {
             <h1 className="text-2xl sm:text-3xl font-bold tracking-tight">MP2H Admin</h1>
             <p className="mt-1 text-emerald-100 text-sm sm:text-base">Manage court bookings.</p>
           </div>
-          <button
-            onClick={handleSignOut}
-            className="rounded-xl border border-emerald-500 bg-emerald-800/40 px-4 py-2 text-sm font-medium hover:bg-emerald-800/70 transition-colors"
-          >
-            Sign out
-          </button>
+          <div className="flex gap-2">
+            <button
+              onClick={() => setChangePasswordOpen(true)}
+              className="rounded-xl border border-emerald-500 bg-emerald-800/40 px-4 py-2 text-sm font-medium hover:bg-emerald-800/70 transition-colors"
+            >
+              Change Password
+            </button>
+            <button
+              onClick={handleSignOut}
+              className="rounded-xl border border-emerald-500 bg-emerald-800/40 px-4 py-2 text-sm font-medium hover:bg-emerald-800/70 transition-colors"
+            >
+              Sign out
+            </button>
+          </div>
         </div>
       </header>
 
@@ -124,12 +136,17 @@ export default function AdminPage() {
             {activeTab === 'bookings' && <BookingsTab />}
             {activeTab === 'courts' && <CourtsTab />}
             {activeTab === 'blocks' && <BlockSlotsTab />}
+            {activeTab === 'hours' && <HoursTab />}
             {activeTab === 'branding' && <BrandingTab />}
-            {activeTab === 'admins' && <AdminsTab />}
+            {activeTab === 'admins' && isSuperAdmin && <AdminsTab />}
             {activeTab === 'danger' && isSuperAdmin && <DangerZoneTab />}
           </div>
         </div>
       </main>
+
+      {changePasswordOpen && (
+        <ChangePasswordModal onClose={() => setChangePasswordOpen(false)} />
+      )}
     </div>
   );
 }

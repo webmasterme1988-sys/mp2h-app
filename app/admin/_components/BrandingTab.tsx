@@ -1,8 +1,9 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { supabase } from '@/lib/supabase';
 import { fetchSiteSettings, DEFAULT_SITE_SETTINGS, type SiteSettings } from '@/lib/siteSettings';
+import { fetchPaymentQrCodes, MAX_PAYMENT_QR_CODES, type PaymentQrCode } from '@/lib/paymentQrCodes';
 
 async function uploadBrandingImage(file: File, prefix: string): Promise<string> {
   const ext = file.name.split('.').pop() || 'png';
@@ -18,7 +19,17 @@ async function uploadBrandingImage(file: File, prefix: string): Promise<string> 
   return data.publicUrl;
 }
 
+// Public URLs look like `.../storage/v1/object/public/branding/<path>` —
+// pull the path back out so we can also delete the underlying file.
+function brandingPathFromPublicUrl(url: string): string | null {
+  const marker = '/branding/';
+  const i = url.indexOf(marker);
+  return i === -1 ? null : url.slice(i + marker.length);
+}
+
 export default function BrandingTab() {
+  // ---------- Site settings (title, subtitle, color, button label, logo, note) ----------
+
   const [loading, setLoading] = useState(true);
   const [settings, setSettings] = useState<SiteSettings>(DEFAULT_SITE_SETTINGS);
 
@@ -26,21 +37,17 @@ export default function BrandingTab() {
   const [siteSubtitle, setSiteSubtitle] = useState('');
   const [primaryColor, setPrimaryColor] = useState('#059669');
   const [submitButtonLabel, setSubmitButtonLabel] = useState('');
+  const [paymentNote, setPaymentNote] = useState('');
 
   const [logoFile, setLogoFile] = useState<File | null>(null);
   const [logoPreview, setLogoPreview] = useState<string | null>(null);
   const [removeLogo, setRemoveLogo] = useState(false);
-
-  const [qrFile, setQrFile] = useState<File | null>(null);
-  const [qrPreview, setQrPreview] = useState<string | null>(null);
-  const [removeQr, setRemoveQr] = useState(false);
 
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState(false);
 
   const logoInputRef = useRef<HTMLInputElement>(null);
-  const qrInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     fetchSiteSettings(supabase).then((loaded) => {
@@ -49,6 +56,7 @@ export default function BrandingTab() {
       setSiteSubtitle(loaded.site_subtitle);
       setPrimaryColor(loaded.primary_color);
       setSubmitButtonLabel(loaded.submit_button_label);
+      setPaymentNote(loaded.payment_note ?? '');
       setLoading(false);
     });
   }, []);
@@ -58,13 +66,6 @@ export default function BrandingTab() {
     setLogoFile(file);
     setRemoveLogo(false);
     setLogoPreview(file ? URL.createObjectURL(file) : null);
-  }
-
-  function handleQrChange(e: React.ChangeEvent<HTMLInputElement>) {
-    const file = e.target.files?.[0] ?? null;
-    setQrFile(file);
-    setRemoveQr(false);
-    setQrPreview(file ? URL.createObjectURL(file) : null);
   }
 
   async function handleSave(e: React.FormEvent) {
@@ -78,10 +79,6 @@ export default function BrandingTab() {
       if (removeLogo) logoUrl = null;
       if (logoFile) logoUrl = await uploadBrandingImage(logoFile, 'logo');
 
-      let qrUrl = settings.gcash_qr_url;
-      if (removeQr) qrUrl = null;
-      if (qrFile) qrUrl = await uploadBrandingImage(qrFile, 'gcash-qr');
-
       const { error: upsertError } = await supabase.from('site_settings').upsert({
         id: 1,
         site_title: siteTitle.trim() || DEFAULT_SITE_SETTINGS.site_title,
@@ -89,7 +86,7 @@ export default function BrandingTab() {
         primary_color: primaryColor,
         submit_button_label: submitButtonLabel.trim() || DEFAULT_SITE_SETTINGS.submit_button_label,
         logo_url: logoUrl,
-        gcash_qr_url: qrUrl,
+        payment_note: paymentNote.trim() || null,
       });
 
       if (upsertError) throw new Error(upsertError.message);
@@ -99,11 +96,7 @@ export default function BrandingTab() {
       setLogoFile(null);
       setLogoPreview(null);
       setRemoveLogo(false);
-      setQrFile(null);
-      setQrPreview(null);
-      setRemoveQr(false);
       if (logoInputRef.current) logoInputRef.current.value = '';
-      if (qrInputRef.current) qrInputRef.current.value = '';
       setSuccess(true);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Could not save branding settings.');
@@ -112,162 +105,309 @@ export default function BrandingTab() {
     }
   }
 
-  if (loading) {
-    return (
-      <section className="bg-white rounded-2xl shadow-sm border border-slate-200 p-4 sm:p-6">
-        <p className="text-sm text-slate-400">Loading branding settings…</p>
+  const currentLogo = logoPreview ?? (removeLogo ? null : settings.logo_url);
+
+  return (
+    <div className="space-y-6">
+      <section className="bg-white rounded-2xl shadow-sm border border-slate-200 p-4 sm:p-6 max-w-2xl">
+        <h2 className="text-lg font-semibold text-slate-800 mb-1">Branding &amp; Settings</h2>
+        <p className="text-sm text-slate-500 mb-6">
+          Customize how the public booking page looks to customers.
+        </p>
+
+        {loading ? (
+          <p className="text-sm text-slate-400">Loading branding settings…</p>
+        ) : (
+          <form onSubmit={handleSave} className="space-y-6">
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+              <div>
+                <label className="block text-sm font-medium text-slate-600 mb-1">
+                  Header Title
+                </label>
+                <input
+                  type="text"
+                  value={siteTitle}
+                  onChange={(e) => setSiteTitle(e.target.value)}
+                  className="w-full rounded-xl border border-slate-300 px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                />
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-slate-600 mb-1">
+                  Primary Color
+                </label>
+                <div className="flex items-center gap-2">
+                  <input
+                    type="color"
+                    value={primaryColor}
+                    onChange={(e) => setPrimaryColor(e.target.value)}
+                    className="h-10 w-14 rounded-lg border border-slate-300 cursor-pointer"
+                  />
+                  <input
+                    type="text"
+                    value={primaryColor}
+                    onChange={(e) => setPrimaryColor(e.target.value)}
+                    placeholder="#059669"
+                    className="flex-1 rounded-xl border border-slate-300 px-3 py-2.5 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                  />
+                </div>
+              </div>
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-slate-600 mb-1">Sub-text</label>
+              <input
+                type="text"
+                value={siteSubtitle}
+                onChange={(e) => setSiteSubtitle(e.target.value)}
+                className="w-full rounded-xl border border-slate-300 px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
+              />
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-slate-600 mb-1">
+                &quot;Submit Booking&quot; Button Label
+              </label>
+              <input
+                type="text"
+                value={submitButtonLabel}
+                onChange={(e) => setSubmitButtonLabel(e.target.value)}
+                className="w-full sm:w-64 rounded-xl border border-slate-300 px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
+              />
+            </div>
+
+            <div>
+              <label className="block text-sm font-medium text-slate-600 mb-1">
+                Payment Note{' '}
+                <span className="text-slate-400 font-normal">
+                  (shown below the QR code — e.g. a mobile number to contact if it won&apos;t scan)
+                </span>
+              </label>
+              <input
+                type="text"
+                value={paymentNote}
+                onChange={(e) => setPaymentNote(e.target.value)}
+                placeholder="QR not working? Text 0917-123-4567"
+                className="w-full rounded-xl border border-slate-300 px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
+              />
+            </div>
+
+            <div className="pt-4 border-t border-slate-100">
+              <label className="block text-sm font-medium text-slate-600 mb-2">Logo</label>
+              {currentLogo && (
+                <img
+                  src={currentLogo}
+                  alt="Logo preview"
+                  className="h-16 w-auto object-contain mb-2 rounded border border-slate-200 bg-slate-50 p-2"
+                />
+              )}
+              <input
+                ref={logoInputRef}
+                type="file"
+                accept="image/*"
+                onChange={handleLogoChange}
+                className="w-full text-sm text-slate-600 file:mr-3 file:rounded-lg file:border-0 file:bg-emerald-50 file:text-emerald-700 file:px-4 file:py-2 file:text-sm file:font-medium hover:file:bg-emerald-100"
+              />
+              {currentLogo && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setRemoveLogo(true);
+                    setLogoFile(null);
+                    setLogoPreview(null);
+                    if (logoInputRef.current) logoInputRef.current.value = '';
+                  }}
+                  className="mt-2 text-xs text-red-600 hover:text-red-700 underline underline-offset-2"
+                >
+                  Remove logo
+                </button>
+              )}
+            </div>
+
+            {error && <p className="text-sm text-red-600">{error}</p>}
+            {success && <p className="text-sm text-emerald-600">Saved.</p>}
+
+            <button
+              type="submit"
+              disabled={saving}
+              className="rounded-xl bg-emerald-600 text-white font-medium px-6 py-2.5 text-sm hover:bg-emerald-700 disabled:opacity-60 disabled:cursor-not-allowed transition-colors"
+            >
+              {saving ? 'Saving…' : 'Save Changes'}
+            </button>
+          </form>
+        )}
       </section>
-    );
+
+      <PaymentQrCodesSection />
+    </div>
+  );
+}
+
+// ---------- Payment QR Codes (GCash / Maya / bank, up to MAX_PAYMENT_QR_CODES) ----------
+
+function PaymentQrCodesSection() {
+  const [qrCodes, setQrCodes] = useState<PaymentQrCode[]>([]);
+  const [qrLoading, setQrLoading] = useState(true);
+  const [qrError, setQrError] = useState<string | null>(null);
+
+  const [newQrLabel, setNewQrLabel] = useState('');
+  const [newQrFile, setNewQrFile] = useState<File | null>(null);
+  const [addingQr, setAddingQr] = useState(false);
+  const [removingQrId, setRemovingQrId] = useState<number | null>(null);
+
+  const newQrFileInputRef = useRef<HTMLInputElement>(null);
+
+  const fetchQrCodes = useCallback(async () => {
+    setQrLoading(true);
+    setQrError(null);
+    const list = await fetchPaymentQrCodes(supabase);
+    setQrCodes(list);
+    setQrLoading(false);
+  }, []);
+
+  useEffect(() => {
+    fetchQrCodes();
+  }, [fetchQrCodes]);
+
+  async function handleAddQrCode(e: React.FormEvent) {
+    e.preventDefault();
+    const label = newQrLabel.trim();
+    if (!label || !newQrFile) return;
+
+    setAddingQr(true);
+    setQrError(null);
+
+    try {
+      const imageUrl = await uploadBrandingImage(newQrFile, 'qr');
+
+      const { error } = await supabase.from('payment_qr_codes').insert({
+        label,
+        image_url: imageUrl,
+        sort_order: qrCodes.length,
+      });
+
+      if (error) throw new Error(error.message);
+
+      setNewQrLabel('');
+      setNewQrFile(null);
+      if (newQrFileInputRef.current) newQrFileInputRef.current.value = '';
+      await fetchQrCodes();
+    } catch (err) {
+      setQrError(err instanceof Error ? err.message : 'Could not add QR code.');
+    } finally {
+      setAddingQr(false);
+    }
   }
 
-  const currentLogo = logoPreview ?? (removeLogo ? null : settings.logo_url);
-  const currentQr = qrPreview ?? (removeQr ? null : settings.gcash_qr_url);
+  async function handleRemoveQrCode(qr: PaymentQrCode) {
+    if (!window.confirm(`Remove the "${qr.label}" QR code?`)) return;
+
+    setRemovingQrId(qr.id);
+    setQrError(null);
+
+    const { error } = await supabase.from('payment_qr_codes').delete().eq('id', qr.id);
+
+    if (error) {
+      setQrError(`Could not remove QR code: ${error.message}`);
+      setRemovingQrId(null);
+      return;
+    }
+
+    const path = brandingPathFromPublicUrl(qr.image_url);
+    if (path) {
+      await supabase.storage.from('branding').remove([path]);
+    }
+
+    setRemovingQrId(null);
+    await fetchQrCodes();
+  }
+
+  const atMax = qrCodes.length >= MAX_PAYMENT_QR_CODES;
 
   return (
     <section className="bg-white rounded-2xl shadow-sm border border-slate-200 p-4 sm:p-6 max-w-2xl">
-      <h2 className="text-lg font-semibold text-slate-800 mb-1">Branding &amp; Settings</h2>
-      <p className="text-sm text-slate-500 mb-6">
-        Customize how the public booking page and receipts page look to customers.
+      <h2 className="text-lg font-semibold text-slate-800 mb-1">Payment QR Codes</h2>
+      <p className="text-sm text-slate-500 mb-4">
+        Add up to {MAX_PAYMENT_QR_CODES} QR codes (GCash, Maya, bank transfer, etc). With just one
+        configured, customers see it directly; with more than one, they can choose which to pay
+        with.
       </p>
 
-      <form onSubmit={handleSave} className="space-y-6">
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-          <div>
-            <label className="block text-sm font-medium text-slate-600 mb-1">Header Title</label>
-            <input
-              type="text"
-              value={siteTitle}
-              onChange={(e) => setSiteTitle(e.target.value)}
-              className="w-full rounded-xl border border-slate-300 px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
-            />
-          </div>
+      {qrError && <p className="text-sm text-red-600 mb-3">{qrError}</p>}
 
-          <div>
-            <label className="block text-sm font-medium text-slate-600 mb-1">Primary Color</label>
-            <div className="flex items-center gap-2">
-              <input
-                type="color"
-                value={primaryColor}
-                onChange={(e) => setPrimaryColor(e.target.value)}
-                className="h-10 w-14 rounded-lg border border-slate-300 cursor-pointer"
+      {qrLoading ? (
+        <p className="text-sm text-slate-400">Loading QR codes…</p>
+      ) : (
+        <div className="space-y-2 mb-5">
+          {qrCodes.length === 0 && (
+            <p className="text-sm text-slate-400">
+              No QR codes configured yet — the page falls back to /public/gcash-qr.png until you
+              add one.
+            </p>
+          )}
+          {qrCodes.map((qr) => (
+            <div
+              key={qr.id}
+              className="flex items-center gap-3 rounded-xl border border-slate-200 p-3"
+            >
+              <img
+                src={qr.image_url}
+                alt={qr.label}
+                className="h-12 w-12 object-contain rounded border border-slate-200 bg-slate-50 shrink-0"
               />
+              <p className="flex-1 text-sm font-medium text-slate-800">{qr.label}</p>
+              <button
+                onClick={() => handleRemoveQrCode(qr)}
+                disabled={removingQrId === qr.id}
+                className="rounded-lg bg-red-50 text-red-700 border border-red-200 text-xs font-medium px-3 py-1.5 hover:bg-red-100 disabled:opacity-40 disabled:cursor-not-allowed transition-colors shrink-0"
+              >
+                {removingQrId === qr.id ? 'Removing…' : 'Remove'}
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+
+      {atMax ? (
+        <p className="text-sm text-amber-700 bg-amber-50 border border-amber-200 rounded-xl px-3 py-2">
+          Maximum of {MAX_PAYMENT_QR_CODES} QR codes reached. Remove one to add another.
+        </p>
+      ) : (
+        <form onSubmit={handleAddQrCode} className="space-y-3">
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div>
+              <label className="block text-sm font-medium text-slate-600 mb-1">
+                Label <span className="text-slate-400 font-normal">(e.g. GCash, Maya, BDO)</span>
+              </label>
               <input
                 type="text"
-                value={primaryColor}
-                onChange={(e) => setPrimaryColor(e.target.value)}
-                placeholder="#059669"
-                className="flex-1 rounded-xl border border-slate-300 px-3 py-2.5 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                value={newQrLabel}
+                onChange={(e) => setNewQrLabel(e.target.value)}
+                placeholder="GCash"
+                className="w-full rounded-xl border border-slate-300 px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
+              />
+            </div>
+            <div>
+              <label className="block text-sm font-medium text-slate-600 mb-1">QR Image</label>
+              <input
+                ref={newQrFileInputRef}
+                type="file"
+                accept="image/*"
+                onChange={(e) => setNewQrFile(e.target.files?.[0] ?? null)}
+                className="w-full text-sm text-slate-600 file:mr-3 file:rounded-lg file:border-0 file:bg-emerald-50 file:text-emerald-700 file:px-3 file:py-2 file:text-sm file:font-medium hover:file:bg-emerald-100"
               />
             </div>
           </div>
-        </div>
 
-        <div>
-          <label className="block text-sm font-medium text-slate-600 mb-1">Sub-text</label>
-          <input
-            type="text"
-            value={siteSubtitle}
-            onChange={(e) => setSiteSubtitle(e.target.value)}
-            className="w-full rounded-xl border border-slate-300 px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
-          />
-        </div>
-
-        <div>
-          <label className="block text-sm font-medium text-slate-600 mb-1">
-            &quot;Submit Booking&quot; Button Label
-          </label>
-          <input
-            type="text"
-            value={submitButtonLabel}
-            onChange={(e) => setSubmitButtonLabel(e.target.value)}
-            className="w-full sm:w-64 rounded-xl border border-slate-300 px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
-          />
-        </div>
-
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-6 pt-2 border-t border-slate-100">
-          <div className="pt-4">
-            <label className="block text-sm font-medium text-slate-600 mb-2">Logo</label>
-            {currentLogo && (
-              <img
-                src={currentLogo}
-                alt="Logo preview"
-                className="h-16 w-auto object-contain mb-2 rounded border border-slate-200 bg-slate-50 p-2"
-              />
-            )}
-            <input
-              ref={logoInputRef}
-              type="file"
-              accept="image/*"
-              onChange={handleLogoChange}
-              className="w-full text-sm text-slate-600 file:mr-3 file:rounded-lg file:border-0 file:bg-emerald-50 file:text-emerald-700 file:px-4 file:py-2 file:text-sm file:font-medium hover:file:bg-emerald-100"
-            />
-            {currentLogo && (
-              <button
-                type="button"
-                onClick={() => {
-                  setRemoveLogo(true);
-                  setLogoFile(null);
-                  setLogoPreview(null);
-                  if (logoInputRef.current) logoInputRef.current.value = '';
-                }}
-                className="mt-2 text-xs text-red-600 hover:text-red-700 underline underline-offset-2"
-              >
-                Remove logo
-              </button>
-            )}
-          </div>
-
-          <div className="pt-4">
-            <label className="block text-sm font-medium text-slate-600 mb-2">
-              GCash QR Code
-            </label>
-            {currentQr && (
-              <img
-                src={currentQr}
-                alt="QR code preview"
-                className="h-16 w-16 object-contain mb-2 rounded border border-slate-200 bg-slate-50 p-2"
-              />
-            )}
-            <input
-              ref={qrInputRef}
-              type="file"
-              accept="image/*"
-              onChange={handleQrChange}
-              className="w-full text-sm text-slate-600 file:mr-3 file:rounded-lg file:border-0 file:bg-emerald-50 file:text-emerald-700 file:px-4 file:py-2 file:text-sm file:font-medium hover:file:bg-emerald-100"
-            />
-            {currentQr && (
-              <button
-                type="button"
-                onClick={() => {
-                  setRemoveQr(true);
-                  setQrFile(null);
-                  setQrPreview(null);
-                  if (qrInputRef.current) qrInputRef.current.value = '';
-                }}
-                className="mt-2 text-xs text-red-600 hover:text-red-700 underline underline-offset-2"
-              >
-                Remove QR code
-              </button>
-            )}
-            {!currentQr && (
-              <p className="mt-2 text-xs text-slate-400">
-                Falls back to /public/gcash-qr.png until you upload one.
-              </p>
-            )}
-          </div>
-        </div>
-
-        {error && <p className="text-sm text-red-600">{error}</p>}
-        {success && <p className="text-sm text-emerald-600">Saved.</p>}
-
-        <button
-          type="submit"
-          disabled={saving}
-          className="rounded-xl bg-emerald-600 text-white font-medium px-6 py-2.5 text-sm hover:bg-emerald-700 disabled:opacity-60 disabled:cursor-not-allowed transition-colors"
-        >
-          {saving ? 'Saving…' : 'Save Changes'}
-        </button>
-      </form>
+          <button
+            type="submit"
+            disabled={addingQr || !newQrLabel.trim() || !newQrFile}
+            className="rounded-lg bg-emerald-600 text-white text-sm font-medium px-4 py-2.5 hover:bg-emerald-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+          >
+            {addingQr ? 'Adding…' : 'Add QR Code'}
+          </button>
+        </form>
+      )}
     </section>
   );
 }

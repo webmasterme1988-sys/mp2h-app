@@ -5,24 +5,29 @@ import { useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabase';
 
 type SessionState = 'checking' | 'ready' | 'invalid';
+// This page serves two links that both land here with the same hash-based
+// token format: an admin invite ("type=invite") and a "forgot password"
+// recovery link ("type=recovery"). Copy adapts based on which one it was.
+type LinkType = 'invite' | 'recovery';
 
 export default function SetPasswordPage() {
   const router = useRouter();
 
   const [sessionState, setSessionState] = useState<SessionState>('checking');
+  const [linkType, setLinkType] = useState<LinkType>('invite');
   const [password, setPassword] = useState('');
   const [confirmPassword, setConfirmPassword] = useState('');
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
 
-  // The invite link's tokens live in the URL fragment (#access_token=...).
+  // The link's tokens live in the URL fragment (#access_token=...).
   // @supabase/ssr's browser client hardcodes flowType: 'pkce' with no way to
-  // opt out, but admin-issued invite links can never be PKCE (the browser
-  // accepting the invite isn't the one that sent it, so there's no shared
-  // code verifier) — Supabase's own docs say so. The client's automatic
-  // detectSessionInUrl handling chokes on that mismatch and silently drops
-  // the session. So we parse the hash ourselves and call setSession()
-  // directly, which doesn't care about flow type.
+  // opt out, but admin-issued invite/recovery links can never be PKCE (the
+  // browser accepting the link isn't the one that sent it, so there's no
+  // shared code verifier) — Supabase's own docs say so. The client's
+  // automatic detectSessionInUrl handling chokes on that mismatch and
+  // silently drops the session. So we parse the hash ourselves and call
+  // setSession() directly, which doesn't care about flow type.
   useEffect(() => {
     async function establishSession() {
       const hash = window.location.hash.startsWith('#')
@@ -31,6 +36,9 @@ export default function SetPasswordPage() {
       const params = new URLSearchParams(hash);
       const accessToken = params.get('access_token');
       const refreshToken = params.get('refresh_token');
+      if (params.get('type') === 'recovery') {
+        setLinkType('recovery');
+      }
 
       if (accessToken && refreshToken) {
         const { data } = await supabase.auth.setSession({
@@ -81,17 +89,22 @@ export default function SetPasswordPage() {
   return (
     <div className="min-h-screen bg-slate-50 flex items-center justify-center px-4">
       <div className="w-full max-w-sm bg-white rounded-2xl shadow-sm border border-slate-200 p-6">
-        <h1 className="text-xl font-bold text-slate-800 mb-1">Set your password</h1>
+        <h1 className="text-xl font-bold text-slate-800 mb-1">
+          {linkType === 'recovery' ? 'Reset your password' : 'Set your password'}
+        </h1>
 
         {sessionState === 'checking' && (
-          <p className="text-sm text-slate-400 mt-4">Verifying invite link…</p>
+          <p className="text-sm text-slate-400 mt-4">
+            {linkType === 'recovery' ? 'Verifying reset link…' : 'Verifying invite link…'}
+          </p>
         )}
 
         {sessionState === 'invalid' && (
           <>
             <p className="text-sm text-slate-500 mt-4">
-              This invite link is invalid or has expired. Ask an existing admin to send you a new
-              one.
+              {linkType === 'recovery'
+                ? 'This password reset link is invalid or has expired. Request a new one from the login page.'
+                : 'This invite link is invalid or has expired. Ask an existing admin to send you a new one.'}
             </p>
             <a
               href="/admin/login"
@@ -104,7 +117,11 @@ export default function SetPasswordPage() {
 
         {sessionState === 'ready' && (
           <>
-            <p className="text-sm text-slate-500 mb-6">Choose a password to finish setting up your admin account.</p>
+            <p className="text-sm text-slate-500 mb-6">
+              {linkType === 'recovery'
+                ? 'Choose a new password for your admin account.'
+                : 'Choose a password to finish setting up your admin account.'}
+            </p>
 
             <form onSubmit={handleSubmit} className="space-y-4">
               <div>
@@ -140,7 +157,7 @@ export default function SetPasswordPage() {
                 disabled={saving}
                 className="w-full rounded-xl bg-emerald-600 text-white font-medium py-2.5 text-sm hover:bg-emerald-700 disabled:opacity-60 disabled:cursor-not-allowed transition-colors"
               >
-                {saving ? 'Saving…' : 'Set Password & Continue'}
+                {saving ? 'Saving…' : linkType === 'recovery' ? 'Reset Password & Continue' : 'Set Password & Continue'}
               </button>
             </form>
           </>

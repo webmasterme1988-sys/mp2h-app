@@ -5,10 +5,11 @@ export interface TimeSlot {
   endISO: (date: string) => string;
 }
 
-// Shared between the public booking page and the admin dashboard so a
-// blocked slot always lines up with an actual bookable slot.
-export const START_HOUR = 6; // 6:00 AM
-export const END_HOUR = 22; // last slot START time is 9:00 PM, ending at 10:00 PM
+// Fallback used only if site_settings hasn't been configured (or fails to
+// load) — matches the app's original hardcoded hours so nothing changes for
+// sites that haven't set custom hours yet.
+export const DEFAULT_OPENING_HOUR = 6; // 6:00 AM
+export const DEFAULT_CLOSING_HOUR = 22; // last slot starts 9:00 PM, ends 10:00 PM
 
 export function formatHourLabel(hour: number) {
   const period = hour >= 12 ? 'PM' : 'AM';
@@ -17,9 +18,15 @@ export function formatHourLabel(hour: number) {
   return `${displayHour}:00 ${period}`;
 }
 
-function buildTimeSlots(): TimeSlot[] {
+// Shared between the public booking page and the admin dashboard so a
+// blocked slot always lines up with an actual bookable slot — both must
+// build the list from the same configured opening/closing hour.
+export function buildTimeSlots(
+  openingHour: number = DEFAULT_OPENING_HOUR,
+  closingHour: number = DEFAULT_CLOSING_HOUR
+): TimeSlot[] {
   const slots: TimeSlot[] = [];
-  for (let hour = START_HOUR; hour < END_HOUR; hour++) {
+  for (let hour = openingHour; hour < closingHour; hour++) {
     slots.push({
       hour,
       label: `${formatHourLabel(hour)} - ${formatHourLabel(hour + 1)}`,
@@ -31,8 +38,6 @@ function buildTimeSlots(): TimeSlot[] {
   }
   return slots;
 }
-
-export const TIME_SLOTS = buildTimeSlots();
 
 export function todayISODate() {
   const now = new Date();

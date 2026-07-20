@@ -1,4 +1,8 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
+import { DEFAULT_OPENING_HOUR, DEFAULT_CLOSING_HOUR } from './timeSlots';
+
+// 0 = Sunday ... 6 = Saturday, matching JS Date#getDay().
+export const ALL_DAYS_OPEN = [0, 1, 2, 3, 4, 5, 6];
 
 export interface SiteSettings {
   site_title: string;
@@ -6,7 +10,13 @@ export interface SiteSettings {
   logo_url: string | null;
   primary_color: string;
   submit_button_label: string;
+  /** @deprecated superseded by the payment_qr_codes table, kept for backward compatibility */
   gcash_qr_url: string | null;
+  payment_note: string | null;
+  opening_hour: number;
+  closing_hour: number;
+  open_days: number[];
+  pending_hold_minutes: number;
 }
 
 // Matches the current hardcoded look of the app, so sites that haven't
@@ -19,10 +29,15 @@ export const DEFAULT_SITE_SETTINGS: SiteSettings = {
   primary_color: '#059669', // Tailwind emerald-600
   submit_button_label: 'Submit Booking',
   gcash_qr_url: null,
+  payment_note: null,
+  opening_hour: DEFAULT_OPENING_HOUR,
+  closing_hour: DEFAULT_CLOSING_HOUR,
+  open_days: ALL_DAYS_OPEN,
+  pending_hold_minutes: 10,
 };
 
 const SITE_SETTINGS_COLUMNS =
-  'site_title, site_subtitle, logo_url, primary_color, submit_button_label, gcash_qr_url';
+  'site_title, site_subtitle, logo_url, primary_color, submit_button_label, gcash_qr_url, payment_note, opening_hour, closing_hour, open_days, pending_hold_minutes';
 
 // Branding is a nice-to-have, not core booking functionality — if the table
 // isn't set up yet or the query fails for any reason, fall back to defaults
@@ -39,5 +54,9 @@ export async function fetchSiteSettings(supabase: SupabaseClient): Promise<SiteS
     return DEFAULT_SITE_SETTINGS;
   }
 
-  return { ...DEFAULT_SITE_SETTINGS, ...data };
+  const merged = { ...DEFAULT_SITE_SETTINGS, ...data };
+  if (!merged.open_days || merged.open_days.length === 0) {
+    merged.open_days = ALL_DAYS_OPEN;
+  }
+  return merged;
 }

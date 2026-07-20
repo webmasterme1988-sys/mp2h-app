@@ -7,6 +7,7 @@ interface DateCalendarProps {
   minDate: string; // 'YYYY-MM-DD'
   onSelect: (date: string) => void;
   accentColor?: string; // defaults to emerald-600, override for branded pages
+  isDateDisabled?: (iso: string) => boolean; // e.g. closed weekdays, holidays
 }
 
 const WEEKDAY_LABELS = ['S', 'M', 'T', 'W', 'T', 'F', 'S'];
@@ -29,6 +30,7 @@ export default function DateCalendar({
   minDate,
   onSelect,
   accentColor,
+  isDateDisabled,
 }: DateCalendarProps) {
   const initial = parseISODate(selectedDate);
   const [viewYear, setViewYear] = useState(initial.year);
@@ -98,7 +100,7 @@ export default function DateCalendar({
 
           const iso = toISODate(viewYear, viewMonth, day);
           const isSelected = iso === selectedDate;
-          const isDisabled = iso < minDate;
+          const isDisabled = iso < minDate || (isDateDisabled?.(iso) ?? false);
 
           return (
             <button

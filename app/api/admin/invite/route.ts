@@ -31,6 +31,13 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: 'Not authenticated.' }, { status: 401 });
   }
 
+  // Only the super admin may invite new admins — matches the Admins tab
+  // being hidden from everyone else, checked against app_metadata, which
+  // regular users cannot set on themselves (only the service-role key can).
+  if (user.app_metadata?.role !== 'super_admin') {
+    return NextResponse.json({ error: 'Only a super admin can invite new admins.' }, { status: 403 });
+  }
+
   const { email } = (await request.json().catch(() => ({}))) as { email?: string };
 
   if (!email || !EMAIL_RE.test(email)) {

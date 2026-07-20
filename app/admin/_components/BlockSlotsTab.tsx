@@ -1,9 +1,11 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { supabase } from '@/lib/supabase';
 import DateCalendar from '@/components/DateCalendar';
-import { TIME_SLOTS, todayISODate } from '@/lib/timeSlots';
+import { buildTimeSlots, todayISODate } from '@/lib/timeSlots';
+import { fetchSiteSettings, DEFAULT_SITE_SETTINGS, type SiteSettings } from '@/lib/siteSettings';
+import { fetchHolidays, type Holiday } from '@/lib/holidays';
 
 interface Court {
   id: string;
@@ -31,16 +33,34 @@ function formatDateTime(iso: string) {
 
 export default function BlockSlotsTab() {
   const [courts, setCourts] = useState<Court[]>([]);
+  const [settings, setSettings] = useState<SiteSettings>(DEFAULT_SITE_SETTINGS);
+  const [holidays, setHolidays] = useState<Holiday[]>([]);
 
   const [blockedSlots, setBlockedSlots] = useState<BlockedSlot[]>([]);
   const [blockedSlotsLoading, setBlockedSlotsLoading] = useState(true);
   const [blockedSlotsError, setBlockedSlotsError] = useState<string | null>(null);
   const [blockCourtId, setBlockCourtId] = useState<string | null>(null);
   const [blockDate, setBlockDate] = useState<string>(todayISODate());
-  const [blockHour, setBlockHour] = useState<number>(TIME_SLOTS[0]?.hour ?? 6);
+  const [blockHour, setBlockHour] = useState<number | null>(null);
   const [blockReason, setBlockReason] = useState('');
   const [addingBlock, setAddingBlock] = useState(false);
   const [removingBlockId, setRemovingBlockId] = useState<number | null>(null);
+
+  const timeSlots = useMemo(
+    () => buildTimeSlots(settings.opening_hour, settings.closing_hour),
+    [settings.opening_hour, settings.closing_hour]
+  );
+
+  const holidayDates = useMemo(() => new Set(holidays.map((h) => h.holiday_date)), [holidays]);
+
+  const isDateClosed = useCallback(
+    (iso: string) => {
+      if (holidayDates.has(iso)) return true;
+      const weekday = new Date(`${iso}T00:00:00`).getDay();
+      return !settings.open_days.includes(weekday);
+    },
+    [holidayDates, settings.open_days]
+  );
 
   useEffect(() => {
     supabase
@@ -54,7 +74,18 @@ export default function BlockSlotsTab() {
         }
         setCourts((data ?? []) as Court[]);
       });
+    fetchSiteSettings(supabase).then(setSettings);
+    fetchHolidays(supabase).then(setHolidays);
   }, []);
+
+  // Default the time-slot picker to the first slot once hours load (or
+  // reset it if the configured hours change and shrink the slot list).
+  useEffect(() => {
+    if (timeSlots.length === 0) return;
+    if (blockHour === null || !timeSlots.some((s) => s.hour === blockHour)) {
+      setBlockHour(timeSlots[0].hour);
+    }
+  }, [timeSlots, blockHour]);
 
   const fetchBlockedSlots = useCallback(async () => {
     setBlockedSlotsLoading(true);
@@ -91,7 +122,7 @@ export default function BlockSlotsTab() {
     e.preventDefault();
     if (!blockCourtId) return;
 
-    const slot = TIME_SLOTS.find((s) => s.hour === blockHour);
+    const slot = timeSlots.find((s) => s.hour === blockHour);
     if (!slot) return;
 
     setAddingBlock(true);
@@ -168,11 +199,11 @@ export default function BlockSlotsTab() {
           <div>
             <label className="block text-sm font-medium text-slate-600 mb-1">Time Slot</label>
             <select
-              value={blockHour}
+              value={blockHour ?? ''}
               onChange={(e) => setBlockHour(Number(e.target.value))}
               className="w-full rounded-xl border border-slate-300 px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
             >
-              {TIME_SLOTS.map((slot) => (
+              {timeSlots.map((slot) => (
                 <option key={slot.hour} value={slot.hour}>
                   {slot.label}
                 </option>
@@ -183,7 +214,12 @@ export default function BlockSlotsTab() {
 
         <div>
           <label className="block text-sm font-medium text-slate-600 mb-1">Date</label>
-          <DateCalendar selectedDate={blockDate} minDate={todayISODate()} onSelect={setBlockDate} />
+          <DateCalendar
+            selectedDate={blockDate}
+            minDate={todayISODate()}
+            onSelect={setBlockDate}
+            isDateDisabled={isDateClosed}
+          />
         </div>
 
         <div>

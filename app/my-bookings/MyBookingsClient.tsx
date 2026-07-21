@@ -213,7 +213,8 @@ export default function MyBookingsClient({ initialSettings }: { initialSettings:
                 {transactionGroups.map((group) => (
                   <li
                     key={group.key}
-                    className="px-4 sm:px-6 py-4 flex items-center justify-between gap-4"
+                    onClick={() => setDetailsKey(group.key)}
+                    className="px-4 sm:px-6 py-4 flex items-center justify-between gap-4 cursor-pointer hover:bg-slate-50 transition-colors"
                   >
                     <div>
                       <p className="font-medium text-slate-800">

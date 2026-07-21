@@ -81,8 +81,6 @@ export function buildCustomerConfirmationEmail(
     `Total Hours: ${totalHours}`,
     totalPrice !== null ? '' : null,
     totalPrice !== null ? `Total: ${formatPrice(totalPrice)}` : null,
-    '',
-    'See you on the court!',
   ];
 
   const footerText = footerHtml ? htmlToPlainText(footerHtml) : '';
@@ -121,7 +119,6 @@ export function buildCustomerConfirmationEmail(
     Total Hours: ${totalHours}
   </p>
   ${totalPrice !== null ? `<p style="margin: 0 0 16px;">Total: ${formatPrice(totalPrice)}</p>` : ''}
-  <p style="margin: 0 0 16px;">See you on the court!</p>
   ${
     footerHtml
       ? `<hr style="border: none; border-top: 1px solid #e5e7eb; margin: 24px 0;">

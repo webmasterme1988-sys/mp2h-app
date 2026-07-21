@@ -719,7 +719,11 @@ export default function BookingsTab() {
                 {sortedGroups.map((group) => {
                   const isBulkUpdating = bulkUpdatingKey === group.key;
                   return (
-                    <tr key={group.key} className="border-b border-slate-100 last:border-0">
+                    <tr
+                      key={group.key}
+                      onClick={() => setDetailsKey(group.key)}
+                      className="border-b border-slate-100 last:border-0 cursor-pointer hover:bg-slate-50 transition-colors"
+                    >
                       <td className="px-4 sm:px-6 py-3 font-medium text-slate-800 whitespace-nowrap">
                         {group.playerName}
                       </td>
@@ -761,7 +765,10 @@ export default function BookingsTab() {
                           </span>
                         )}
                       </td>
-                      <td className="px-4 sm:px-6 py-3 whitespace-nowrap">
+                      <td
+                        className="px-4 sm:px-6 py-3 whitespace-nowrap"
+                        onClick={(e) => e.stopPropagation()}
+                      >
                         <button
                           onClick={() => setDetailsKey(group.key)}
                           className="rounded-lg bg-slate-100 text-slate-700 border border-slate-200 text-xs font-medium px-3 py-1.5 hover:bg-slate-200 transition-colors"
@@ -769,7 +776,7 @@ export default function BookingsTab() {
                           View Details
                         </button>
                       </td>
-                      <td className="px-4 sm:px-6 py-3">
+                      <td className="px-4 sm:px-6 py-3" onClick={(e) => e.stopPropagation()}>
                         <div className="flex gap-2 whitespace-nowrap">
                           <button
                             onClick={() => handleBulkAction(group, 'confirmed')}

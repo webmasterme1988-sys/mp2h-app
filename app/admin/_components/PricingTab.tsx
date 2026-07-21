@@ -224,13 +224,22 @@ export default function PricingTab() {
 
     setSavingTierId(id);
 
-    const { error } = await supabase
+    // .select() after the update so a permission gap surfaces as a clear
+    // error instead of silently doing nothing — an UPDATE blocked by RLS
+    // returns success with zero rows affected rather than an error.
+    const { data, error } = await supabase
       .from('price_tiers')
       .update({ start_hour: draft.start_hour, end_hour: draft.end_hour, price: draft.price })
-      .eq('id', id);
+      .eq('id', id)
+      .select();
 
     if (error) {
       setTiersError(`Could not update tier: ${error.message}`);
+      setSavingTierId(null);
+      return;
+    }
+    if (!data || data.length === 0) {
+      setTiersError('Could not update tier: no changes were saved. Please try again.');
       setSavingTierId(null);
       return;
     }

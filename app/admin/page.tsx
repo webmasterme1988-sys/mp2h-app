@@ -148,13 +148,11 @@ export default function AdminPage() {
         (payload) => {
           const row = payload.new as { player_name?: string };
           const toastId = `${Date.now()}-${Math.random()}`;
+          // Stays until the admin dismisses it — no auto-hide timeout.
           setToasts((prev) => [
             ...prev,
             { id: toastId, message: `New booking from ${row.player_name ?? 'a customer'}` },
           ]);
-          setTimeout(() => {
-            setToasts((prev) => prev.filter((t) => t.id !== toastId));
-          }, 6000);
           playNotificationSound();
 
           // Already looking at the Bookings tab (which live-refetches on

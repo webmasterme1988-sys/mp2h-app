@@ -10,6 +10,9 @@ export interface SiteSettings {
   site_subtitle: string;
   logo_url: string | null;
   primary_color: string;
+  selection_color: string;
+  button_bg_color: string;
+  button_label_color: string;
   submit_button_label: string;
   /** @deprecated superseded by the payment_qr_codes table, kept for backward compatibility */
   gcash_qr_url: string | null;
@@ -28,6 +31,8 @@ export interface SiteSettings {
   marketing_image_url: string | null;
   customer_email_footer_html: string | null;
   attach_receipt_to_customer_email: boolean;
+  admin_tab_font_color: string;
+  admin_tab_active_bg_color: string;
 }
 
 // Matches the current hardcoded look of the app, so sites that haven't
@@ -38,6 +43,9 @@ export const DEFAULT_SITE_SETTINGS: SiteSettings = {
   site_subtitle: 'Book a court online — quick, easy, and no phone calls needed.',
   logo_url: null,
   primary_color: '#059669', // Tailwind emerald-600
+  selection_color: '#059669',
+  button_bg_color: '#059669',
+  button_label_color: '#ffffff',
   submit_button_label: 'Submit Booking',
   gcash_qr_url: null,
   payment_note: null,
@@ -55,10 +63,12 @@ export const DEFAULT_SITE_SETTINGS: SiteSettings = {
   marketing_image_url: null,
   customer_email_footer_html: null,
   attach_receipt_to_customer_email: false,
+  admin_tab_font_color: '#475569', // Tailwind slate-600
+  admin_tab_active_bg_color: '#059669', // Tailwind emerald-600
 };
 
 const SITE_SETTINGS_COLUMNS =
-  'site_title, site_subtitle, logo_url, primary_color, submit_button_label, gcash_qr_url, payment_note, opening_hour, closing_hour, open_days, pending_hold_minutes, auto_confirm_bookings, allow_multi_slot_booking, show_price, pricing_mode, flat_price, notify_customer_on_approval, attach_marketing_image, marketing_image_url, customer_email_footer_html, attach_receipt_to_customer_email';
+  'site_title, site_subtitle, logo_url, primary_color, selection_color, button_bg_color, button_label_color, submit_button_label, gcash_qr_url, payment_note, opening_hour, closing_hour, open_days, pending_hold_minutes, auto_confirm_bookings, allow_multi_slot_booking, show_price, pricing_mode, flat_price, notify_customer_on_approval, attach_marketing_image, marketing_image_url, customer_email_footer_html, attach_receipt_to_customer_email, admin_tab_font_color, admin_tab_active_bg_color';
 
 // Branding is a nice-to-have, not core booking functionality — if the table
 // isn't set up yet or the query fails for any reason, fall back to defaults

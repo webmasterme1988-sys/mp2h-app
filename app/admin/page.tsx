@@ -3,6 +3,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import { supabase } from '@/lib/supabase';
+import { fetchSiteSettings, DEFAULT_SITE_SETTINGS, type SiteSettings } from '@/lib/siteSettings';
 import BookingsTab from './_components/BookingsTab';
 import CourtsTab from './_components/CourtsTab';
 import BlockSlotsTab from './_components/BlockSlotsTab';
@@ -81,6 +82,11 @@ export default function AdminPage() {
   const activeTabRef = useRef<TabId>('bookings');
   const [changePasswordOpen, setChangePasswordOpen] = useState(false);
   const [newBookingsCount, setNewBookingsCount] = useState(0);
+  const [settings, setSettings] = useState<SiteSettings>(DEFAULT_SITE_SETTINGS);
+
+  useEffect(() => {
+    fetchSiteSettings(supabase).then(setSettings);
+  }, []);
 
   useEffect(() => {
     activeTabRef.current = activeTab;
@@ -201,22 +207,22 @@ export default function AdminPage() {
         </div>
       )}
 
-      <header className="bg-emerald-700 text-white">
+      <header style={{ backgroundColor: settings.primary_color }} className="text-white">
         <div className="max-w-6xl mx-auto px-4 py-6 flex items-center justify-between">
           <div>
             <h1 className="text-2xl sm:text-3xl font-bold tracking-tight">MP2H Admin</h1>
-            <p className="mt-1 text-emerald-100 text-sm sm:text-base">Manage court bookings.</p>
+            <p className="mt-1 text-white/80 text-sm sm:text-base">Manage court bookings.</p>
           </div>
           <div className="flex gap-2">
             <button
               onClick={() => setChangePasswordOpen(true)}
-              className="rounded-xl border border-emerald-500 bg-emerald-800/40 px-4 py-2 text-sm font-medium hover:bg-emerald-800/70 transition-colors"
+              className="rounded-xl border border-white/30 bg-white/10 px-4 py-2 text-sm font-medium hover:bg-white/20 transition-colors"
             >
               Change Password
             </button>
             <button
               onClick={handleSignOut}
-              className="rounded-xl border border-emerald-500 bg-emerald-800/40 px-4 py-2 text-sm font-medium hover:bg-emerald-800/70 transition-colors"
+              className="rounded-xl border border-white/30 bg-white/10 px-4 py-2 text-sm font-medium hover:bg-white/20 transition-colors"
             >
               Sign out
             </button>
@@ -230,6 +236,7 @@ export default function AdminPage() {
           <nav className="w-full sm:w-56 shrink-0 flex sm:flex-col gap-1 overflow-x-auto sm:overflow-visible">
             {visibleTabs.map((tab) => {
               const isActive = activeTab === tab.id;
+              const isDanger = tab.id === 'danger';
               return (
                 <button
                   key={tab.id}
@@ -237,14 +244,21 @@ export default function AdminPage() {
                     setActiveTab(tab.id);
                     if (tab.id === 'bookings') setNewBookingsCount(0);
                   }}
+                  style={
+                    isDanger
+                      ? undefined
+                      : isActive
+                      ? { backgroundColor: settings.admin_tab_active_bg_color, color: '#ffffff' }
+                      : { color: settings.admin_tab_font_color }
+                  }
                   className={`text-left whitespace-nowrap rounded-xl px-4 py-2.5 text-sm font-medium transition-colors flex items-center gap-2 ${
-                    isActive
-                      ? tab.id === 'danger'
+                    isDanger
+                      ? isActive
                         ? 'bg-red-600 text-white'
-                        : 'bg-emerald-600 text-white'
-                      : tab.id === 'danger'
-                      ? 'text-red-700 hover:bg-red-50'
-                      : 'text-slate-600 hover:bg-slate-100'
+                        : 'text-red-700 hover:bg-red-50'
+                      : isActive
+                      ? ''
+                      : 'hover:bg-slate-100'
                   }`}
                 >
                   {tab.label}

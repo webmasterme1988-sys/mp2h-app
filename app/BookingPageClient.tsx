@@ -498,7 +498,7 @@ export default function BookingPageClient({
                       onClick={() => setSelectedCourtId(court.id)}
                       style={
                         isSelected
-                          ? { backgroundColor: settings.primary_color, borderColor: settings.primary_color }
+                          ? { backgroundColor: settings.selection_color, borderColor: settings.selection_color }
                           : undefined
                       }
                       className={`flex-1 rounded-xl border px-4 py-2.5 text-sm font-medium transition-colors ${
@@ -520,7 +520,7 @@ export default function BookingPageClient({
                 selectedDate={selectedDate}
                 minDate={todayISODate()}
                 onSelect={setSelectedDate}
-                accentColor={settings.primary_color}
+                accentColor={settings.selection_color}
                 isDateDisabled={isDateClosed}
               />
             </div>
@@ -553,7 +553,7 @@ export default function BookingPageClient({
                     key={slot.hour}
                     disabled={booked || blocked || past}
                     onClick={() => handleSlotClick(slot)}
-                    style={selected ? { backgroundColor: settings.primary_color, borderColor: settings.primary_color } : undefined}
+                    style={selected ? { backgroundColor: settings.selection_color, borderColor: settings.selection_color } : undefined}
                     className={`rounded-xl border px-3 py-3 text-sm font-medium text-center transition-colors ${
                       booked
                         ? 'bg-slate-100 border-slate-200 text-slate-400 cursor-not-allowed line-through'
@@ -579,8 +579,8 @@ export default function BookingPageClient({
           {settings.allow_multi_slot_booking && selectedSlots.length > 0 && (
             <button
               onClick={handleBookSelectedSlots}
-              style={{ backgroundColor: settings.primary_color }}
-              className="w-full mt-4 rounded-xl text-white font-medium py-3 text-sm hover:brightness-90 transition-[filter]"
+              style={{ backgroundColor: settings.button_bg_color, color: settings.button_label_color }}
+              className="w-full mt-4 rounded-xl font-medium py-3 text-sm hover:brightness-90 transition-[filter]"
             >
               Book {selectedSlots.length} Selected Slot{selectedSlots.length > 1 ? 's' : ''}
               {settings.show_price ? ` — ${formatPrice(totalPrice)}` : ''}
@@ -696,8 +696,8 @@ export default function BookingPageClient({
                       setSelectedSlots([]);
                       setSubmitState('idle');
                     }}
-                    style={{ backgroundColor: settings.primary_color }}
-                    className="w-full mt-4 rounded-xl text-white font-medium py-3 text-sm hover:brightness-90 transition-[filter]"
+                    style={{ backgroundColor: settings.button_bg_color, color: settings.button_label_color }}
+                    className="w-full mt-4 rounded-xl font-medium py-3 text-sm hover:brightness-90 transition-[filter]"
                   >
                     Done
                   </button>
@@ -796,7 +796,7 @@ export default function BookingPageClient({
                               onClick={() => setSelectedQrIndex(i)}
                               style={
                                 isSelected
-                                  ? { backgroundColor: settings.primary_color, borderColor: settings.primary_color }
+                                  ? { backgroundColor: settings.selection_color, borderColor: settings.selection_color }
                                   : undefined
                               }
                               className={`rounded-full border px-3 py-1 text-xs font-medium transition-colors ${
@@ -877,8 +877,8 @@ export default function BookingPageClient({
                   <button
                     onClick={handleSubmitBooking}
                     disabled={submitState === 'uploading' || submitState === 'saving' || compressingReceipt}
-                    style={{ backgroundColor: settings.primary_color }}
-                    className="w-full rounded-xl text-white font-medium py-3 text-sm hover:brightness-90 disabled:opacity-60 disabled:cursor-not-allowed transition-[filter]"
+                    style={{ backgroundColor: settings.button_bg_color, color: settings.button_label_color }}
+                    className="w-full rounded-xl font-medium py-3 text-sm hover:brightness-90 disabled:opacity-60 disabled:cursor-not-allowed transition-[filter]"
                   >
                     {submitState === 'uploading'
                       ? 'Uploading receipt…'

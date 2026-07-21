@@ -190,8 +190,8 @@ export default function MyBookingsClient({ initialSettings }: { initialSettings:
             <button
               type="submit"
               disabled={loading}
-              style={{ backgroundColor: settings.primary_color }}
-              className="rounded-xl text-white font-medium px-6 py-2.5 text-sm hover:brightness-90 disabled:opacity-60 disabled:cursor-not-allowed transition-[filter]"
+              style={{ backgroundColor: settings.button_bg_color, color: settings.button_label_color }}
+              className="rounded-xl font-medium px-6 py-2.5 text-sm hover:brightness-90 disabled:opacity-60 disabled:cursor-not-allowed transition-[filter]"
             >
               {loading ? 'Searching…' : 'View My Bookings'}
             </button>

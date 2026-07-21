@@ -16,6 +16,11 @@ export default function BrandingTab() {
   const [siteTitle, setSiteTitle] = useState('');
   const [siteSubtitle, setSiteSubtitle] = useState('');
   const [primaryColor, setPrimaryColor] = useState('#059669');
+  const [selectionColor, setSelectionColor] = useState('#059669');
+  const [buttonBgColor, setButtonBgColor] = useState('#059669');
+  const [buttonLabelColor, setButtonLabelColor] = useState('#ffffff');
+  const [adminTabFontColor, setAdminTabFontColor] = useState('#475569');
+  const [adminTabActiveBgColor, setAdminTabActiveBgColor] = useState('#059669');
   const [submitButtonLabel, setSubmitButtonLabel] = useState('');
   const [paymentNote, setPaymentNote] = useState('');
 
@@ -35,6 +40,11 @@ export default function BrandingTab() {
       setSiteTitle(loaded.site_title);
       setSiteSubtitle(loaded.site_subtitle);
       setPrimaryColor(loaded.primary_color);
+      setSelectionColor(loaded.selection_color);
+      setButtonBgColor(loaded.button_bg_color);
+      setButtonLabelColor(loaded.button_label_color);
+      setAdminTabFontColor(loaded.admin_tab_font_color);
+      setAdminTabActiveBgColor(loaded.admin_tab_active_bg_color);
       setSubmitButtonLabel(loaded.submit_button_label);
       setPaymentNote(loaded.payment_note ?? '');
       setLoading(false);
@@ -64,6 +74,11 @@ export default function BrandingTab() {
         site_title: siteTitle.trim() || DEFAULT_SITE_SETTINGS.site_title,
         site_subtitle: siteSubtitle.trim(),
         primary_color: primaryColor,
+        selection_color: selectionColor,
+        button_bg_color: buttonBgColor,
+        button_label_color: buttonLabelColor,
+        admin_tab_font_color: adminTabFontColor,
+        admin_tab_active_bg_color: adminTabActiveBgColor,
         submit_button_label: submitButtonLabel.trim() || DEFAULT_SITE_SETTINGS.submit_button_label,
         logo_url: logoUrl,
         payment_note: paymentNote.trim() || null,
@@ -130,6 +145,122 @@ export default function BrandingTab() {
                     placeholder="#059669"
                     className="flex-1 rounded-xl border border-slate-300 px-3 py-2.5 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-emerald-500"
                   />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-slate-600 mb-1">
+                  Selected Court / Date Color
+                </label>
+                <p className="text-xs text-slate-400 mb-1.5">
+                  The highlight color for the currently selected court, date, or time slot.
+                </p>
+                <div className="flex items-center gap-2">
+                  <input
+                    type="color"
+                    value={selectionColor}
+                    onChange={(e) => setSelectionColor(e.target.value)}
+                    className="h-10 w-14 rounded-lg border border-slate-300 cursor-pointer"
+                  />
+                  <input
+                    type="text"
+                    value={selectionColor}
+                    onChange={(e) => setSelectionColor(e.target.value)}
+                    placeholder="#059669"
+                    className="flex-1 rounded-xl border border-slate-300 px-3 py-2.5 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-slate-600 mb-1">
+                  Button Background Color
+                </label>
+                <div className="flex items-center gap-2">
+                  <input
+                    type="color"
+                    value={buttonBgColor}
+                    onChange={(e) => setButtonBgColor(e.target.value)}
+                    className="h-10 w-14 rounded-lg border border-slate-300 cursor-pointer"
+                  />
+                  <input
+                    type="text"
+                    value={buttonBgColor}
+                    onChange={(e) => setButtonBgColor(e.target.value)}
+                    placeholder="#059669"
+                    className="flex-1 rounded-xl border border-slate-300 px-3 py-2.5 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                  />
+                </div>
+              </div>
+
+              <div>
+                <label className="block text-sm font-medium text-slate-600 mb-1">
+                  Button Label Color
+                </label>
+                <div className="flex items-center gap-2">
+                  <input
+                    type="color"
+                    value={buttonLabelColor}
+                    onChange={(e) => setButtonLabelColor(e.target.value)}
+                    className="h-10 w-14 rounded-lg border border-slate-300 cursor-pointer"
+                  />
+                  <input
+                    type="text"
+                    value={buttonLabelColor}
+                    onChange={(e) => setButtonLabelColor(e.target.value)}
+                    placeholder="#ffffff"
+                    className="flex-1 rounded-xl border border-slate-300 px-3 py-2.5 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                  />
+                </div>
+              </div>
+            </div>
+
+            <div className="pt-4 border-t border-slate-100">
+              <h3 className="text-sm font-semibold text-slate-700 mb-1">Admin Dashboard Appearance</h3>
+              <p className="text-xs text-slate-500 mb-3">
+                Applies to this admin dashboard only — customers never see these.
+              </p>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-slate-600 mb-1">
+                    Tab Font Color
+                  </label>
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="color"
+                      value={adminTabFontColor}
+                      onChange={(e) => setAdminTabFontColor(e.target.value)}
+                      className="h-10 w-14 rounded-lg border border-slate-300 cursor-pointer"
+                    />
+                    <input
+                      type="text"
+                      value={adminTabFontColor}
+                      onChange={(e) => setAdminTabFontColor(e.target.value)}
+                      placeholder="#475569"
+                      className="flex-1 rounded-xl border border-slate-300 px-3 py-2.5 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                    />
+                  </div>
+                </div>
+
+                <div>
+                  <label className="block text-sm font-medium text-slate-600 mb-1">
+                    Active Tab Background Color
+                  </label>
+                  <div className="flex items-center gap-2">
+                    <input
+                      type="color"
+                      value={adminTabActiveBgColor}
+                      onChange={(e) => setAdminTabActiveBgColor(e.target.value)}
+                      className="h-10 w-14 rounded-lg border border-slate-300 cursor-pointer"
+                    />
+                    <input
+                      type="text"
+                      value={adminTabActiveBgColor}
+                      onChange={(e) => setAdminTabActiveBgColor(e.target.value)}
+                      placeholder="#059669"
+                      className="flex-1 rounded-xl border border-slate-300 px-3 py-2.5 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                    />
+                  </div>
                 </div>
               </div>
             </div>

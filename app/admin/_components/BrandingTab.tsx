@@ -4,6 +4,7 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { supabase } from '@/lib/supabase';
 import { fetchSiteSettings, DEFAULT_SITE_SETTINGS, type SiteSettings } from '@/lib/siteSettings';
 import { fetchPaymentQrCodes, MAX_PAYMENT_QR_CODES, type PaymentQrCode } from '@/lib/paymentQrCodes';
+import { fetchEmailSettings, DEFAULT_EMAIL_SETTINGS, type EmailSettings } from '@/lib/emailSettings';
 
 async function uploadBrandingImage(file: File, prefix: string): Promise<string> {
   const ext = file.name.split('.').pop() || 'png';
@@ -239,7 +240,208 @@ export default function BrandingTab() {
       </section>
 
       <PaymentQrCodesSection />
+      <EmailNotificationsSection />
     </div>
+  );
+}
+
+// ---------- Email Notifications (Gmail sender used for admin alerts and
+// customer confirmations) ----------
+//
+// Configured here instead of environment variables so it's the same in
+// local dev and production without touching either separately. The App
+// Password is write-only: the database itself withholds the stored value
+// from this (authenticated-admin) role, so the field always starts blank —
+// leaving it blank on save keeps whatever's already configured.
+
+function EmailNotificationsSection() {
+  const [loading, setLoading] = useState(true);
+  const [settings, setSettings] = useState<EmailSettings>(DEFAULT_EMAIL_SETTINGS);
+
+  const [gmailUser, setGmailUser] = useState('');
+  const [adminNotificationEmail, setAdminNotificationEmail] = useState('');
+  const [appPassword, setAppPassword] = useState('');
+
+  const [saving, setSaving] = useState(false);
+  const [clearing, setClearing] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [success, setSuccess] = useState(false);
+
+  const loadSettings = useCallback(async () => {
+    setLoading(true);
+    const loaded = await fetchEmailSettings(supabase);
+    setSettings(loaded);
+    setGmailUser(loaded.gmailUser);
+    setAdminNotificationEmail(loaded.adminNotificationEmail);
+    setAppPassword('');
+    setLoading(false);
+  }, []);
+
+  useEffect(() => {
+    loadSettings();
+  }, [loadSettings]);
+
+  async function handleSave(e: React.FormEvent) {
+    e.preventDefault();
+    setError(null);
+    setSuccess(false);
+
+    // nodemailer's `to` field natively accepts a comma-separated address
+    // list, so multiple recipients "just work" without any backend
+    // changes — validate each one here so a typo shows up immediately
+    // instead of silently failing to deliver to that address later.
+    const notificationEmails = adminNotificationEmail
+      .split(',')
+      .map((email) => email.trim())
+      .filter(Boolean);
+    const invalidEmail = notificationEmails.find((email) => !/\S+@\S+\.\S+/.test(email));
+    if (invalidEmail) {
+      setError(`"${invalidEmail}" doesn't look like a valid email address.`);
+      return;
+    }
+
+    setSaving(true);
+
+    const update: Record<string, string | boolean | null> = {
+      gmail_user: gmailUser.trim() || null,
+      admin_notification_email: notificationEmails.length > 0 ? notificationEmails.join(', ') : null,
+    };
+    // Only touch the password if the admin actually typed a new one —
+    // an empty field means "leave it as-is", not "clear it".
+    if (appPassword.trim()) {
+      update.gmail_app_password = appPassword.trim();
+      update.app_password_set = true;
+    }
+
+    const { error: updateError } = await supabase
+      .from('email_settings')
+      .update(update)
+      .eq('id', 1);
+
+    if (updateError) {
+      setError(updateError.message);
+      setSaving(false);
+      return;
+    }
+
+    setSaving(false);
+    setSuccess(true);
+    await loadSettings();
+  }
+
+  async function handleClearPassword() {
+    if (!window.confirm('Clear the saved App Password? Email notifications will stop working until a new one is set.')) {
+      return;
+    }
+
+    setClearing(true);
+    setError(null);
+
+    const { error: updateError } = await supabase
+      .from('email_settings')
+      .update({ gmail_app_password: null, app_password_set: false })
+      .eq('id', 1);
+
+    if (updateError) {
+      setError(updateError.message);
+      setClearing(false);
+      return;
+    }
+
+    setClearing(false);
+    await loadSettings();
+  }
+
+  return (
+    <section className="bg-white rounded-2xl shadow-sm border border-slate-200 p-4 sm:p-6 max-w-2xl">
+      <h2 className="text-lg font-semibold text-slate-800 mb-1">Email Notifications</h2>
+      <p className="text-sm text-slate-500 mb-6">
+        The Gmail account used to send the admin &quot;new booking&quot; alert and the customer
+        confirmation email. Requires an{' '}
+        <a
+          href="https://myaccount.google.com/apppasswords"
+          target="_blank"
+          rel="noreferrer"
+          className="text-emerald-700 hover:text-emerald-800 underline underline-offset-2"
+        >
+          App Password
+        </a>{' '}
+        (not your regular Gmail password) — 2-Step Verification must be enabled on the account
+        first.
+      </p>
+
+      {loading ? (
+        <p className="text-sm text-slate-400">Loading email settings…</p>
+      ) : (
+        <form onSubmit={handleSave} className="space-y-4">
+          <div>
+            <label className="block text-sm font-medium text-slate-600 mb-1">Gmail Address</label>
+            <input
+              type="email"
+              value={gmailUser}
+              onChange={(e) => setGmailUser(e.target.value)}
+              placeholder="yourclub@gmail.com"
+              className="w-full rounded-xl border border-slate-300 px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
+            />
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-slate-600 mb-1">
+              App Password{' '}
+              <span className="text-slate-400 font-normal">
+                ({settings.appPasswordSet ? 'currently set — leave blank to keep it' : 'not set yet'})
+              </span>
+            </label>
+            <input
+              type="password"
+              value={appPassword}
+              onChange={(e) => setAppPassword(e.target.value)}
+              placeholder={settings.appPasswordSet ? '••••••••••••••••' : '16-character App Password'}
+              autoComplete="off"
+              className="w-full rounded-xl border border-slate-300 px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
+            />
+            {settings.appPasswordSet && (
+              <button
+                type="button"
+                onClick={handleClearPassword}
+                disabled={clearing}
+                className="mt-1.5 text-xs text-red-600 hover:text-red-700 underline underline-offset-2 disabled:opacity-50"
+              >
+                {clearing ? 'Clearing…' : 'Clear saved App Password'}
+              </button>
+            )}
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-slate-600 mb-1">
+              Admin Notification Email{' '}
+              <span className="text-slate-400 font-normal">
+                (optional, comma-separated for multiple — defaults to the Gmail address above)
+              </span>
+            </label>
+            <input
+              type="email"
+              multiple
+              value={adminNotificationEmail}
+              onChange={(e) => setAdminNotificationEmail(e.target.value)}
+              placeholder="alerts@example.com, manager@example.com"
+              className="w-full rounded-xl border border-slate-300 px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
+            />
+          </div>
+
+          {error && <p className="text-sm text-red-600">{error}</p>}
+          {success && <p className="text-sm text-emerald-600">Saved.</p>}
+
+          <button
+            type="submit"
+            disabled={saving}
+            className="rounded-xl bg-emerald-600 text-white font-medium px-6 py-2.5 text-sm hover:bg-emerald-700 disabled:opacity-60 disabled:cursor-not-allowed transition-colors"
+          >
+            {saving ? 'Saving…' : 'Save Changes'}
+          </button>
+        </form>
+      )}
+    </section>
   );
 }
 

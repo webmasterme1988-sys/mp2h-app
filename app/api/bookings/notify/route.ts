@@ -1,6 +1,7 @@
 import { NextResponse, type NextRequest } from 'next/server';
 import { createPublicServerClient } from '@/lib/supabase/publicServerClient';
-import { getMailTransporter } from '@/lib/mailer';
+import { getSupabaseAdmin } from '@/lib/supabase/admin';
+import { getMailTransporter, fetchEmailCredentials } from '@/lib/mailer';
 import { formatPrice } from '@/lib/priceTiers';
 import { fetchSiteSettings } from '@/lib/siteSettings';
 
@@ -10,6 +11,7 @@ interface NotifyBookingRow {
   player_phone: string;
   player_email: string | null;
   start_time: string;
+  end_time: string;
   status: string;
   receipt_url: string | null;
   price: number | null;
@@ -30,7 +32,7 @@ export async function POST(request: NextRequest) {
   const { data, error } = await supabase
     .from('bookings')
     .select(
-      'id, player_name, player_phone, player_email, start_time, status, receipt_url, price, courts(name)'
+      'id, player_name, player_phone, player_email, start_time, end_time, status, receipt_url, price, courts(name)'
     )
     .in('id', bookingIds)
     .order('start_time', { ascending: true });
@@ -41,14 +43,24 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ error: 'Booking(s) not found.' }, { status: 404 });
   }
 
-  const to = process.env.ADMIN_NOTIFICATION_EMAIL || process.env.GMAIL_USER;
-  if (!to) {
+  let supabaseAdmin;
+  try {
+    supabaseAdmin = getSupabaseAdmin();
+  } catch (err) {
+    console.error(err);
     return NextResponse.json({ error: 'Notifications are not configured yet.' }, { status: 500 });
   }
 
+  const credentials = await fetchEmailCredentials(supabaseAdmin);
+  if (!credentials?.gmailUser || !credentials.gmailAppPassword) {
+    return NextResponse.json({ error: 'Notifications are not configured yet.' }, { status: 500 });
+  }
+
+  const to = credentials.adminNotificationEmail || credentials.gmailUser;
+
   let transporter;
   try {
-    transporter = getMailTransporter();
+    transporter = getMailTransporter(credentials.gmailUser, credentials.gmailAppPassword);
   } catch (err) {
     console.error(err);
     return NextResponse.json({ error: 'Notifications are not configured yet.' }, { status: 500 });
@@ -60,24 +72,30 @@ export async function POST(request: NextRequest) {
   // Node.js functions default to UTC), not in the customer's or admin's
   // browser, so leaving it implicit silently shows UTC instead of the
   // Philippine time the slot was actually booked for.
-  const formatWhen = (iso: string) =>
-    new Date(iso).toLocaleString('en-US', {
-      dateStyle: 'medium',
-      timeStyle: 'short',
-      timeZone: 'Asia/Manila',
-    });
+  const formatDate = (iso: string) =>
+    new Date(iso).toLocaleDateString('en-US', { dateStyle: 'medium', timeZone: 'Asia/Manila' });
+  // "9:00 AM to 10:00 AM" — the actual booked slot, not just its start time.
+  const formatSlotRange = (startIso: string, endIso: string) => {
+    const fmt = (iso: string) =>
+      new Date(iso).toLocaleTimeString('en-US', {
+        hour: 'numeric',
+        minute: '2-digit',
+        timeZone: 'Asia/Manila',
+      });
+    return `${fmt(startIso)} to ${fmt(endIso)}`;
+  };
 
   const hasPrices = bookings.some((b) => b.price !== null);
   const total = bookings.reduce((sum, b) => sum + (b.price ?? 0), 0);
+  // Each row is one hour-long slot, so the count of rows is the hour total —
+  // same convention the admin dashboard and booking-summary screen use.
+  const totalHours = bookings.length;
 
   const slotLines =
     bookings.length > 1
       ? bookings.map((b) => {
-          const time = new Date(b.start_time).toLocaleString('en-US', {
-            timeStyle: 'short',
-            timeZone: 'Asia/Manila',
-          });
-          return `  - ${time}${hasPrices ? ` (${formatPrice(b.price ?? 0)})` : ''}`;
+          const range = formatSlotRange(b.start_time, b.end_time);
+          return `  - ${range}${hasPrices ? ` (${formatPrice(b.price ?? 0)})` : ''}`;
         })
       : [];
 
@@ -90,7 +108,7 @@ export async function POST(request: NextRequest) {
 
   try {
     await transporter.sendMail({
-      from: process.env.GMAIL_USER,
+      from: credentials.gmailUser,
       to,
       subject,
       text: [
@@ -98,14 +116,15 @@ export async function POST(request: NextRequest) {
           first.player_email ? `, ${first.player_email}` : ''
         }) just booked ${courtName}${bookings.length > 1 ? ` (${bookings.length} slots)` : ''}.`,
         bookings.length > 1
-          ? `Date: ${formatWhen(first.start_time).split(',').slice(0, 2).join(',')} (Philippine time)`
-          : `When: ${formatWhen(first.start_time)} (Philippine time)`,
+          ? `Date: ${formatDate(first.start_time)} (Philippine time)`
+          : `When: ${formatDate(first.start_time)}, ${formatSlotRange(first.start_time, first.end_time)} (Philippine time)`,
         ...slotLines,
+        `Total Hours: ${totalHours}`,
         hasPrices ? `Total: ${formatPrice(total)}` : '',
         `Status: ${first.status}`,
         first.receipt_url ? 'Receipt: attached to this email.' : 'Receipt: not uploaded.',
         '',
-        'Review and approve it in the admin dashboard.',
+        'Review in the admin dashboard.',
       ]
         .filter(Boolean)
         .join('\n'),
@@ -130,7 +149,7 @@ export async function POST(request: NextRequest) {
     if (settings.notify_customer_on_approval) {
       try {
         await transporter.sendMail({
-          from: process.env.GMAIL_USER,
+          from: credentials.gmailUser,
           to: first.player_email,
           subject: `Booking confirmed — ${courtName}${bookings.length > 1 ? ` (${bookings.length} slots)` : ''}`,
           text: [
@@ -139,9 +158,10 @@ export async function POST(request: NextRequest) {
             'Your booking is confirmed!',
             `Court: ${courtName}`,
             bookings.length > 1
-              ? `Date: ${formatWhen(first.start_time).split(',').slice(0, 2).join(',')} (Philippine time)`
-              : `When: ${formatWhen(first.start_time)} (Philippine time)`,
+              ? `Date: ${formatDate(first.start_time)} (Philippine time)`
+              : `When: ${formatDate(first.start_time)}, ${formatSlotRange(first.start_time, first.end_time)} (Philippine time)`,
             ...slotLines,
+            `Total Hours: ${totalHours}`,
             hasPrices ? `Total: ${formatPrice(total)}` : '',
             '',
             'See you on the court!',

@@ -2,7 +2,8 @@ import { NextResponse, type NextRequest } from 'next/server';
 import { cookies } from 'next/headers';
 import { createServerClient } from '@supabase/ssr';
 import { createPublicServerClient } from '@/lib/supabase/publicServerClient';
-import { getMailTransporter } from '@/lib/mailer';
+import { getSupabaseAdmin } from '@/lib/supabase/admin';
+import { getMailTransporter, fetchEmailCredentials } from '@/lib/mailer';
 import { fetchSiteSettings } from '@/lib/siteSettings';
 import { formatPrice } from '@/lib/priceTiers';
 
@@ -11,6 +12,7 @@ interface ConfirmedBookingRow {
   player_name: string;
   player_email: string | null;
   start_time: string;
+  end_time: string;
   price: number | null;
   courts: { name: string } | null;
 }
@@ -58,7 +60,7 @@ export async function POST(request: NextRequest) {
 
   const { data, error } = await supabase
     .from('bookings')
-    .select('id, player_name, player_email, start_time, price, courts(name)')
+    .select('id, player_name, player_email, start_time, end_time, price, courts(name)')
     .eq('id', bookingId)
     .eq('status', 'confirmed')
     .maybeSingle();
@@ -75,32 +77,53 @@ export async function POST(request: NextRequest) {
     return NextResponse.json({ success: true, skipped: 'no_email_on_file' });
   }
 
+  let supabaseAdmin;
+  try {
+    supabaseAdmin = getSupabaseAdmin();
+  } catch (err) {
+    console.error(err);
+    return NextResponse.json({ error: 'Notifications are not configured yet.' }, { status: 500 });
+  }
+
+  const credentials = await fetchEmailCredentials(supabaseAdmin);
+  if (!credentials?.gmailUser || !credentials.gmailAppPassword) {
+    return NextResponse.json({ error: 'Notifications are not configured yet.' }, { status: 500 });
+  }
+
   let transporter;
   try {
-    transporter = getMailTransporter();
+    transporter = getMailTransporter(credentials.gmailUser, credentials.gmailAppPassword);
   } catch (err) {
     console.error(err);
     return NextResponse.json({ error: 'Notifications are not configured yet.' }, { status: 500 });
   }
 
   const courtName = booking.courts?.name ?? 'your court';
-  const when = new Date(booking.start_time).toLocaleString('en-US', {
+  const dateLabel = new Date(booking.start_time).toLocaleDateString('en-US', {
     dateStyle: 'medium',
-    timeStyle: 'short',
     timeZone: 'Asia/Manila',
   });
+  // "9:00 AM to 10:00 AM" — the actual booked slot, not just its start time.
+  const formatTime = (iso: string) =>
+    new Date(iso).toLocaleTimeString('en-US', {
+      hour: 'numeric',
+      minute: '2-digit',
+      timeZone: 'Asia/Manila',
+    });
+  const timeRange = `${formatTime(booking.start_time)} to ${formatTime(booking.end_time)}`;
 
   try {
     await transporter.sendMail({
-      from: process.env.GMAIL_USER,
+      from: credentials.gmailUser,
       to: booking.player_email,
-      subject: `Booking confirmed — ${courtName}, ${when}`,
+      subject: `Booking confirmed — ${courtName}, ${dateLabel} ${timeRange}`,
       text: [
         `Hi ${booking.player_name},`,
         '',
         `Your booking is confirmed!`,
         `Court: ${courtName}`,
-        `When: ${when} (Philippine time)`,
+        `When: ${dateLabel}, ${timeRange} (Philippine time)`,
+        'Total Hours: 1',
         booking.price !== null ? `Price: ${formatPrice(booking.price)}` : '',
         '',
         'See you on the court!',

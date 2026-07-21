@@ -1,10 +1,11 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import { supabase } from '@/lib/supabase';
 import { fetchSiteSettings, DEFAULT_SITE_SETTINGS, type SiteSettings } from '@/lib/siteSettings';
 import { fetchPriceTiers, formatPrice, type PriceTier, type PricingMode } from '@/lib/priceTiers';
 import { formatHourLabel } from '@/lib/timeSlots';
+import { uploadBrandingImage } from '@/lib/brandingStorage';
 
 const HOUR_OPTIONS = Array.from({ length: 25 }, (_, i) => i);
 
@@ -19,6 +20,14 @@ export default function PricingTab() {
   const [showPrice, setShowPrice] = useState(DEFAULT_SITE_SETTINGS.show_price);
   const [pricingMode, setPricingMode] = useState<PricingMode>(DEFAULT_SITE_SETTINGS.pricing_mode);
   const [flatPrice, setFlatPrice] = useState(DEFAULT_SITE_SETTINGS.flat_price);
+
+  const [attachMarketingImage, setAttachMarketingImage] = useState(
+    DEFAULT_SITE_SETTINGS.attach_marketing_image
+  );
+  const [marketingImageFile, setMarketingImageFile] = useState<File | null>(null);
+  const [marketingImagePreview, setMarketingImagePreview] = useState<string | null>(null);
+  const [removeMarketingImage, setRemoveMarketingImage] = useState(false);
+  const marketingImageInputRef = useRef<HTMLInputElement>(null);
 
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -41,9 +50,17 @@ export default function PricingTab() {
       setShowPrice(loaded.show_price);
       setPricingMode(loaded.pricing_mode);
       setFlatPrice(loaded.flat_price);
+      setAttachMarketingImage(loaded.attach_marketing_image);
       setLoading(false);
     });
   }, []);
+
+  function handleMarketingImageChange(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0] ?? null;
+    setMarketingImageFile(file);
+    setRemoveMarketingImage(false);
+    setMarketingImagePreview(file ? URL.createObjectURL(file) : null);
+  }
 
   const fetchTiers = useCallback(async () => {
     setTiersLoading(true);
@@ -69,6 +86,16 @@ export default function PricingTab() {
 
     setSaving(true);
 
+    let marketingImageUrl = settings.marketing_image_url;
+    try {
+      if (removeMarketingImage) marketingImageUrl = null;
+      if (marketingImageFile) marketingImageUrl = await uploadBrandingImage(marketingImageFile, 'marketing');
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Could not upload marketing image.');
+      setSaving(false);
+      return;
+    }
+
     const { error: upsertError } = await supabase.from('site_settings').upsert({
       id: 1,
       site_title: settings.site_title,
@@ -85,6 +112,8 @@ export default function PricingTab() {
       show_price: showPrice,
       pricing_mode: pricingMode,
       flat_price: flatPrice,
+      attach_marketing_image: attachMarketingImage,
+      marketing_image_url: marketingImageUrl,
     });
 
     if (upsertError) {
@@ -95,6 +124,10 @@ export default function PricingTab() {
 
     const refreshed = await fetchSiteSettings(supabase);
     setSettings(refreshed);
+    setMarketingImageFile(null);
+    setMarketingImagePreview(null);
+    setRemoveMarketingImage(false);
+    if (marketingImageInputRef.current) marketingImageInputRef.current.value = '';
     setSaving(false);
     setSuccess(true);
   }
@@ -147,6 +180,9 @@ export default function PricingTab() {
     await fetchTiers();
   }
 
+  const currentMarketingImage =
+    marketingImagePreview ?? (removeMarketingImage ? null : settings.marketing_image_url);
+
   return (
     <div className="space-y-6">
       <section className="bg-white rounded-2xl shadow-sm border border-slate-200 p-4 sm:p-6 max-w-2xl">
@@ -194,6 +230,62 @@ export default function PricingTab() {
                 </span>
               </span>
             </label>
+
+            {notifyOnApproval && (
+              <div className="pl-7 space-y-3 border-l-2 border-slate-100">
+                <label className="flex items-start gap-3 cursor-pointer">
+                  <input
+                    type="checkbox"
+                    checked={attachMarketingImage}
+                    onChange={(e) => setAttachMarketingImage(e.target.checked)}
+                    className="mt-0.5 h-4 w-4 rounded border-slate-300 text-emerald-600 focus:ring-emerald-500"
+                  />
+                  <span>
+                    <span className="block text-sm font-medium text-slate-700">
+                      Attach a marketing image to the confirmation email
+                    </span>
+                    <span className="block text-xs text-slate-500 mt-0.5">
+                      e.g. a promo flyer or upcoming event poster — attached to every booking
+                      confirmation email sent to customers.
+                    </span>
+                  </span>
+                </label>
+
+                {attachMarketingImage && (
+                  <div>
+                    {currentMarketingImage && (
+                      // eslint-disable-next-line @next/next/no-img-element
+                      <img
+                        src={currentMarketingImage}
+                        alt="Marketing image preview"
+                        className="h-24 w-auto object-contain mb-2 rounded border border-slate-200 bg-slate-50 p-2"
+                      />
+                    )}
+                    <input
+                      ref={marketingImageInputRef}
+                      type="file"
+                      accept="image/*"
+                      onChange={handleMarketingImageChange}
+                      className="w-full text-sm text-slate-600 file:mr-3 file:rounded-lg file:border-0 file:bg-emerald-50 file:text-emerald-700 file:px-4 file:py-2 file:text-sm file:font-medium hover:file:bg-emerald-100"
+                    />
+                    {currentMarketingImage && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setRemoveMarketingImage(true);
+                          setMarketingImageFile(null);
+                          setMarketingImagePreview(null);
+                          if (marketingImageInputRef.current) marketingImageInputRef.current.value = '';
+                        }}
+                        className="mt-2 text-xs text-red-600 hover:text-red-700 underline underline-offset-2"
+                      >
+                        Remove image
+                      </button>
+                    )}
+                  </div>
+                )}
+              </div>
+            )}
 
             <label className="flex items-start gap-3 cursor-pointer">
               <input

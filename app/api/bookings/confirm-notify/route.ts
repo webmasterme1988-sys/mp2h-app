@@ -112,6 +112,13 @@ export async function POST(request: NextRequest) {
     });
   const timeRange = `${formatTime(booking.start_time)} to ${formatTime(booking.end_time)}`;
 
+  // Optional promo/flyer attachment, admin-configured.
+  const marketingExt = settings.marketing_image_url?.split('.').pop()?.split(/[?#]/)[0] || 'jpg';
+  const marketingAttachment =
+    settings.attach_marketing_image && settings.marketing_image_url
+      ? [{ filename: `promo.${marketingExt}`, path: settings.marketing_image_url }]
+      : undefined;
+
   try {
     await transporter.sendMail({
       from: credentials.gmailUser,
@@ -130,6 +137,7 @@ export async function POST(request: NextRequest) {
       ]
         .filter(Boolean)
         .join('\n'),
+      attachments: marketingAttachment,
     });
   } catch (err) {
     console.error('Failed to send confirmation email:', err);

@@ -11,9 +11,13 @@ export interface TimeSlot {
 export const DEFAULT_OPENING_HOUR = 6; // 6:00 AM
 export const DEFAULT_CLOSING_HOUR = 22; // last slot starts 9:00 PM, ends 10:00 PM
 
+// Accepts 24 (not just 0-23) so a closing time or price-tier boundary of
+// "end of day" can be represented and displayed as 12:00 AM (midnight)
+// rather than wrapping around to noon.
 export function formatHourLabel(hour: number) {
-  const period = hour >= 12 ? 'PM' : 'AM';
-  let displayHour = hour % 12;
+  const normalizedHour = hour % 24;
+  const period = normalizedHour >= 12 ? 'PM' : 'AM';
+  let displayHour = normalizedHour % 12;
   if (displayHour === 0) displayHour = 12;
   return `${displayHour}:00 ${period}`;
 }

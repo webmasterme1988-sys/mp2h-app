@@ -7,6 +7,9 @@ import { fetchHolidays, type Holiday } from '@/lib/holidays';
 import { formatHourLabel } from '@/lib/timeSlots';
 
 const HOUR_OPTIONS = Array.from({ length: 24 }, (_, i) => i);
+// Closing time goes one hour further than opening time (24 = 12:00 AM,
+// i.e. midnight) so the last bookable slot can run up to 11pm-12am.
+const CLOSING_HOUR_OPTIONS = Array.from({ length: 25 }, (_, i) => i);
 const WEEKDAYS = [
   { value: 0, label: 'Sun' },
   { value: 1, label: 'Mon' },
@@ -217,7 +220,7 @@ export default function HoursTab() {
                   onChange={(e) => setClosingHour(Number(e.target.value))}
                   className="w-full rounded-xl border border-slate-300 px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
                 >
-                  {HOUR_OPTIONS.map((h) => (
+                  {CLOSING_HOUR_OPTIONS.map((h) => (
                     <option key={h} value={h}>
                       {formatHourLabel(h)}
                     </option>

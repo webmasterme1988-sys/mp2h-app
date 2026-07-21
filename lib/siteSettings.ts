@@ -24,6 +24,8 @@ export interface SiteSettings {
   pricing_mode: PricingMode;
   flat_price: number;
   notify_customer_on_approval: boolean;
+  attach_marketing_image: boolean;
+  marketing_image_url: string | null;
 }
 
 // Matches the current hardcoded look of the app, so sites that haven't
@@ -47,10 +49,12 @@ export const DEFAULT_SITE_SETTINGS: SiteSettings = {
   pricing_mode: 'flat',
   flat_price: 0,
   notify_customer_on_approval: false,
+  attach_marketing_image: false,
+  marketing_image_url: null,
 };
 
 const SITE_SETTINGS_COLUMNS =
-  'site_title, site_subtitle, logo_url, primary_color, submit_button_label, gcash_qr_url, payment_note, opening_hour, closing_hour, open_days, pending_hold_minutes, auto_confirm_bookings, allow_multi_slot_booking, show_price, pricing_mode, flat_price, notify_customer_on_approval';
+  'site_title, site_subtitle, logo_url, primary_color, submit_button_label, gcash_qr_url, payment_note, opening_hour, closing_hour, open_days, pending_hold_minutes, auto_confirm_bookings, allow_multi_slot_booking, show_price, pricing_mode, flat_price, notify_customer_on_approval, attach_marketing_image, marketing_image_url';
 
 // Branding is a nice-to-have, not core booking functionality — if the table
 // isn't set up yet or the query fails for any reason, fall back to defaults

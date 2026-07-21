@@ -147,6 +147,14 @@ export async function POST(request: NextRequest) {
   if (first.status === 'confirmed' && first.player_email) {
     const settings = await fetchSiteSettings(supabase);
     if (settings.notify_customer_on_approval) {
+      // Optional promo/flyer attachment, admin-configured — same
+      // http(s)-URL attachment mechanism as the receipt above.
+      const marketingExt = settings.marketing_image_url?.split('.').pop()?.split(/[?#]/)[0] || 'jpg';
+      const marketingAttachment =
+        settings.attach_marketing_image && settings.marketing_image_url
+          ? [{ filename: `promo.${marketingExt}`, path: settings.marketing_image_url }]
+          : undefined;
+
       try {
         await transporter.sendMail({
           from: credentials.gmailUser,
@@ -168,6 +176,7 @@ export async function POST(request: NextRequest) {
           ]
             .filter(Boolean)
             .join('\n'),
+          attachments: marketingAttachment,
         });
       } catch (err) {
         console.error('Failed to send auto-confirm customer email:', err);

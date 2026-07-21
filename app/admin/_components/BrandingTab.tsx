@@ -5,28 +5,7 @@ import { supabase } from '@/lib/supabase';
 import { fetchSiteSettings, DEFAULT_SITE_SETTINGS, type SiteSettings } from '@/lib/siteSettings';
 import { fetchPaymentQrCodes, MAX_PAYMENT_QR_CODES, type PaymentQrCode } from '@/lib/paymentQrCodes';
 import { fetchEmailSettings, DEFAULT_EMAIL_SETTINGS, type EmailSettings } from '@/lib/emailSettings';
-
-async function uploadBrandingImage(file: File, prefix: string): Promise<string> {
-  const ext = file.name.split('.').pop() || 'png';
-  const path = `${prefix}-${Date.now()}.${ext}`;
-
-  const { error } = await supabase.storage
-    .from('branding')
-    .upload(path, file, { cacheControl: '3600', upsert: false });
-
-  if (error) throw new Error(`Upload failed: ${error.message}`);
-
-  const { data } = supabase.storage.from('branding').getPublicUrl(path);
-  return data.publicUrl;
-}
-
-// Public URLs look like `.../storage/v1/object/public/branding/<path>` —
-// pull the path back out so we can also delete the underlying file.
-function brandingPathFromPublicUrl(url: string): string | null {
-  const marker = '/branding/';
-  const i = url.indexOf(marker);
-  return i === -1 ? null : url.slice(i + marker.length);
-}
+import { uploadBrandingImage, brandingPathFromPublicUrl } from '@/lib/brandingStorage';
 
 export default function BrandingTab() {
   // ---------- Site settings (title, subtitle, color, button label, logo, note) ----------

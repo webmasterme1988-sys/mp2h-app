@@ -647,7 +647,7 @@ export default function BookingPageClient({
                   <div className="rounded-xl border border-slate-200 p-4 text-sm space-y-2">
                     {lastTransactionId !== null && (
                       <div className="flex justify-between text-slate-500">
-                        <span>Booking Reference</span>
+                        <span>Confirmation Number</span>
                         <span className="font-medium text-slate-700">#{lastTransactionId}</span>
                       </div>
                     )}

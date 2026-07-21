@@ -5,15 +5,18 @@ import { createPublicServerClient } from '@/lib/supabase/publicServerClient';
 import { getSupabaseAdmin } from '@/lib/supabase/admin';
 import { getMailTransporter, fetchEmailCredentials } from '@/lib/mailer';
 import { fetchSiteSettings } from '@/lib/siteSettings';
-import { formatPrice } from '@/lib/priceTiers';
+import { buildCustomerConfirmationEmail } from '@/lib/customerEmailTemplate';
 
 interface ConfirmedBookingRow {
   id: string;
+  transaction_id: number | null;
   player_name: string;
+  player_phone: string;
   player_email: string | null;
   start_time: string;
   end_time: string;
   price: number | null;
+  receipt_url: string | null;
   courts: { name: string } | null;
 }
 
@@ -60,7 +63,9 @@ export async function POST(request: NextRequest) {
 
   const { data, error } = await supabase
     .from('bookings')
-    .select('id, player_name, player_email, start_time, end_time, price, courts(name)')
+    .select(
+      'id, transaction_id, player_name, player_phone, player_email, start_time, end_time, price, receipt_url, courts(name)'
+    )
     .eq('id', bookingId)
     .eq('status', 'confirmed')
     .maybeSingle();
@@ -112,32 +117,37 @@ export async function POST(request: NextRequest) {
     });
   const timeRange = `${formatTime(booking.start_time)} to ${formatTime(booking.end_time)}`;
 
-  // Optional promo/flyer attachment, admin-configured.
-  const marketingExt = settings.marketing_image_url?.split('.').pop()?.split(/[?#]/)[0] || 'jpg';
-  const marketingAttachment =
-    settings.attach_marketing_image && settings.marketing_image_url
-      ? [{ filename: `promo.${marketingExt}`, path: settings.marketing_image_url }]
-      : undefined;
+  // Optional attachments, both admin-configured.
+  const customerAttachments: { filename: string; path: string }[] = [];
+  if (settings.attach_receipt_to_customer_email && booking.receipt_url) {
+    const receiptExt = booking.receipt_url.split('.').pop()?.split(/[?#]/)[0] || 'jpg';
+    customerAttachments.push({ filename: `receipt.${receiptExt}`, path: booking.receipt_url });
+  }
+  if (settings.attach_marketing_image && settings.marketing_image_url) {
+    const marketingExt = settings.marketing_image_url.split('.').pop()?.split(/[?#]/)[0] || 'jpg';
+    customerAttachments.push({ filename: `promo.${marketingExt}`, path: settings.marketing_image_url });
+  }
+
+  const { text, html } = buildCustomerConfirmationEmail({
+    playerName: booking.player_name,
+    playerPhone: booking.player_phone,
+    transactionId: booking.transaction_id,
+    courtName,
+    dateLabel,
+    slots: [{ timeRange, price: booking.price }],
+    totalHours: 1,
+    totalPrice: booking.price,
+    footerHtml: settings.customer_email_footer_html,
+  });
 
   try {
     await transporter.sendMail({
       from: credentials.gmailUser,
       to: booking.player_email,
       subject: `Booking confirmed — ${courtName}, ${dateLabel} ${timeRange}`,
-      text: [
-        `Hi ${booking.player_name},`,
-        '',
-        `Your booking is confirmed!`,
-        `Court: ${courtName}`,
-        `When: ${dateLabel}, ${timeRange} (Philippine time)`,
-        'Total Hours: 1',
-        booking.price !== null ? `Price: ${formatPrice(booking.price)}` : '',
-        '',
-        'See you on the court!',
-      ]
-        .filter(Boolean)
-        .join('\n'),
-      attachments: marketingAttachment,
+      text,
+      html,
+      attachments: customerAttachments.length > 0 ? customerAttachments : undefined,
     });
   } catch (err) {
     console.error('Failed to send confirmation email:', err);

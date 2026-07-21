@@ -3,18 +3,34 @@
 import { useState, type FormEvent } from 'react';
 import { supabase } from '@/lib/supabase';
 import { type SiteSettings } from '@/lib/siteSettings';
+import { formatPrice } from '@/lib/priceTiers';
 
 // ---------- Types ----------
 
 type BookingStatus = 'pending' | 'confirmed' | 'cancelled';
 
 interface Booking {
-  id: number;
+  id: string;
+  transaction_id: number | null;
   start_time: string;
   end_time: string;
   status: BookingStatus;
   receipt_url: string | null;
+  price: number | null;
+  created_at: string;
   courts: { name: string } | null;
+}
+
+interface TransactionGroup {
+  key: string;
+  transactionId: number | null;
+  bookings: Booking[];
+  courtName: string;
+  createdAt: string;
+  totalHours: number;
+  totalPrice: number | null;
+  status: BookingStatus | 'mixed';
+  receiptUrl: string | null;
 }
 
 // ---------- Helpers ----------
@@ -30,17 +46,74 @@ function formatDateTime(iso: string) {
   });
 }
 
-const STATUS_STYLES: Record<BookingStatus, string> = {
+function formatSlotTimeRange(startIso: string, endIso: string) {
+  const fmt = (iso: string) =>
+    new Date(iso).toLocaleTimeString('en-US', {
+      hour: 'numeric',
+      minute: '2-digit',
+      timeZone: 'Asia/Manila',
+    });
+  return `${fmt(startIso)} - ${fmt(endIso)}`;
+}
+
+const STATUS_STYLES: Record<BookingStatus | 'mixed', string> = {
   pending: 'bg-amber-100 text-amber-700',
   confirmed: 'bg-emerald-100 text-emerald-700',
   cancelled: 'bg-red-100 text-red-700',
+  mixed: 'bg-slate-100 text-slate-600',
 };
 
-const STATUS_LABELS: Record<BookingStatus, string> = {
+const STATUS_LABELS: Record<BookingStatus | 'mixed', string> = {
   pending: 'Payment pending review',
   confirmed: 'Payment confirmed',
   cancelled: 'Cancelled',
+  mixed: 'Mixed status',
 };
+
+function groupByTransaction(bookings: Booking[]): TransactionGroup[] {
+  const map = new Map<string, Booking[]>();
+  for (const b of bookings) {
+    // Bookings from before the transaction_id column existed each get
+    // their own singleton group, keyed by their own id.
+    const key = b.transaction_id !== null ? `t-${b.transaction_id}` : `legacy-${b.id}`;
+    const existing = map.get(key);
+    if (existing) {
+      existing.push(b);
+    } else {
+      map.set(key, [b]);
+    }
+  }
+
+  const groups: TransactionGroup[] = [];
+  for (const [key, groupBookings] of map) {
+    const sorted = [...groupBookings].sort(
+      (a, b) => new Date(a.start_time).getTime() - new Date(b.start_time).getTime()
+    );
+    const first = sorted[0];
+    const statuses = new Set(sorted.map((b) => b.status));
+    const status: BookingStatus | 'mixed' = statuses.size === 1 ? sorted[0].status : 'mixed';
+    const anyPriceMissing = sorted.some((b) => b.price === null);
+    const totalPrice = anyPriceMissing ? null : sorted.reduce((sum, b) => sum + (b.price ?? 0), 0);
+    const createdAt = sorted.reduce(
+      (min, b) => (b.created_at < min ? b.created_at : min),
+      sorted[0].created_at
+    );
+
+    groups.push({
+      key,
+      transactionId: first.transaction_id,
+      bookings: sorted,
+      courtName: first.courts?.name ?? 'Court',
+      createdAt,
+      totalHours: sorted.length,
+      totalPrice,
+      status,
+      receiptUrl: first.receipt_url,
+    });
+  }
+
+  return groups.sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+}
 
 // ---------- Component ----------
 
@@ -54,6 +127,7 @@ export default function MyBookingsClient({ initialSettings }: { initialSettings:
   const [error, setError] = useState<string | null>(null);
   const [bookings, setBookings] = useState<Booking[]>([]);
   const [receiptModalUrl, setReceiptModalUrl] = useState<string | null>(null);
+  const [detailsKey, setDetailsKey] = useState<string | null>(null);
 
   async function handleSearch(e: FormEvent) {
     e.preventDefault();
@@ -66,7 +140,7 @@ export default function MyBookingsClient({ initialSettings }: { initialSettings:
 
     const { data, error } = await supabase
       .from('bookings')
-      .select('id, start_time, end_time, status, receipt_url, courts(name)')
+      .select('id, transaction_id, start_time, end_time, status, receipt_url, price, created_at, courts(name)')
       .eq('player_phone', trimmedPhone)
       .order('start_time', { ascending: false });
 
@@ -81,6 +155,9 @@ export default function MyBookingsClient({ initialSettings }: { initialSettings:
     setBookings((data ?? []) as unknown as Booking[]);
     setLoading(false);
   }
+
+  const transactionGroups = groupByTransaction(bookings);
+  const detailsGroup = transactionGroups.find((g) => g.key === detailsKey) ?? null;
 
   return (
     <div className="min-h-screen bg-slate-50">
@@ -125,37 +202,42 @@ export default function MyBookingsClient({ initialSettings }: { initialSettings:
           <section className="bg-white rounded-2xl shadow-sm border border-slate-200 overflow-hidden">
             {error && <p className="text-sm text-red-600 px-4 sm:px-6 pt-4">{error}</p>}
 
-            {!error && !loading && bookings.length === 0 && (
+            {!error && !loading && transactionGroups.length === 0 && (
               <p className="text-sm text-slate-400 px-4 sm:px-6 py-6">
                 No bookings found for that phone number.
               </p>
             )}
 
-            {bookings.length > 0 && (
+            {transactionGroups.length > 0 && (
               <ul className="divide-y divide-slate-100">
-                {bookings.map((booking) => (
-                  <li key={booking.id} className="px-4 sm:px-6 py-4 flex items-center justify-between gap-4">
+                {transactionGroups.map((group) => (
+                  <li
+                    key={group.key}
+                    className="px-4 sm:px-6 py-4 flex items-center justify-between gap-4"
+                  >
                     <div>
                       <p className="font-medium text-slate-800">
-                        {booking.courts?.name ?? 'Court'}
+                        {group.courtName}
+                        {group.transactionId !== null && (
+                          <span className="text-slate-400 font-normal"> · Transaction #{group.transactionId}</span>
+                        )}
                       </p>
-                      <p className="text-sm text-slate-500">{formatDateTime(booking.start_time)}</p>
+                      <p className="text-sm text-slate-500">{formatDateTime(group.createdAt)}</p>
+                      <p className="text-xs text-slate-400 mt-0.5">
+                        {group.totalHours} hour{group.totalHours !== 1 ? 's' : ''} booked
+                      </p>
                       <span
-                        className={`inline-block mt-1.5 rounded-full px-2.5 py-1 text-xs font-medium ${STATUS_STYLES[booking.status]}`}
+                        className={`inline-block mt-1.5 rounded-full px-2.5 py-1 text-xs font-medium capitalize ${STATUS_STYLES[group.status]}`}
                       >
-                        {STATUS_LABELS[booking.status]}
+                        {STATUS_LABELS[group.status]}
                       </span>
                     </div>
-                    {booking.receipt_url ? (
-                      <button
-                        onClick={() => setReceiptModalUrl(booking.receipt_url)}
-                        className="text-emerald-700 hover:text-emerald-800 text-sm font-medium underline underline-offset-2 shrink-0"
-                      >
-                        View Receipt
-                      </button>
-                    ) : (
-                      <span className="text-slate-300 text-sm shrink-0">No receipt</span>
-                    )}
+                    <button
+                      onClick={() => setDetailsKey(group.key)}
+                      className="rounded-lg bg-slate-100 text-slate-700 border border-slate-200 text-sm font-medium px-3 py-1.5 hover:bg-slate-200 transition-colors shrink-0"
+                    >
+                      View Details
+                    </button>
                   </li>
                 ))}
               </ul>
@@ -163,6 +245,93 @@ export default function MyBookingsClient({ initialSettings }: { initialSettings:
           </section>
         )}
       </main>
+
+      {/* View Details Modal */}
+      {detailsGroup && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4"
+          onClick={() => setDetailsKey(null)}
+        >
+          <div
+            className="bg-white rounded-2xl max-w-lg w-full max-h-[90vh] overflow-y-auto"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="sticky top-0 bg-white border-b border-slate-200 px-5 py-4 flex items-center justify-between">
+              <div>
+                <h3 className="font-semibold text-slate-800">
+                  {detailsGroup.transactionId !== null
+                    ? `Confirmation #${detailsGroup.transactionId}`
+                    : 'Booking Details'}
+                </h3>
+                <p className="text-xs text-slate-500 mt-0.5">
+                  {detailsGroup.courtName} · {formatDateTime(detailsGroup.createdAt)}
+                </p>
+              </div>
+              <button
+                onClick={() => setDetailsKey(null)}
+                className="text-slate-400 hover:text-slate-600 text-xl leading-none px-2"
+                aria-label="Close"
+              >
+                ×
+              </button>
+            </div>
+
+            <div className="p-5 space-y-4">
+              <div className="space-y-1.5">
+                {detailsGroup.bookings.map((booking) => (
+                  <div
+                    key={booking.id}
+                    className="flex items-center justify-between text-sm rounded-lg border border-slate-200 px-3 py-2"
+                  >
+                    <span className="text-slate-700">
+                      {formatSlotTimeRange(booking.start_time, booking.end_time)}
+                    </span>
+                    {settings.show_price && booking.price !== null && (
+                      <span className="text-slate-500">{formatPrice(booking.price)}</span>
+                    )}
+                  </div>
+                ))}
+              </div>
+
+              <div className="flex items-center justify-between text-sm pt-2 border-t border-slate-100">
+                <span className="text-slate-600">Total Hours</span>
+                <span className="font-medium text-slate-800">{detailsGroup.totalHours}</span>
+              </div>
+
+              {settings.show_price && detailsGroup.totalPrice !== null && (
+                <div className="flex items-center justify-between text-sm">
+                  <span className="text-slate-600">Total Amount</span>
+                  <span className="font-semibold text-slate-800">
+                    {formatPrice(detailsGroup.totalPrice)}
+                  </span>
+                </div>
+              )}
+
+              {detailsGroup.transactionId !== null && (
+                <div className="flex items-center justify-between text-sm">
+                  <span className="text-slate-600">Confirmation Number</span>
+                  <span className="font-medium text-slate-800">#{detailsGroup.transactionId}</span>
+                </div>
+              )}
+
+              {detailsGroup.receiptUrl ? (
+                <button
+                  onClick={() => {
+                    const url = detailsGroup.receiptUrl;
+                    setDetailsKey(null);
+                    setReceiptModalUrl(url);
+                  }}
+                  className="text-emerald-700 hover:text-emerald-800 text-sm font-medium underline underline-offset-2"
+                >
+                  View Receipt
+                </button>
+              ) : (
+                <p className="text-sm text-slate-400">No receipt uploaded.</p>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Receipt Modal */}
       {receiptModalUrl && (

@@ -4,9 +4,11 @@ import { getSupabaseAdmin } from '@/lib/supabase/admin';
 import { getMailTransporter, fetchEmailCredentials } from '@/lib/mailer';
 import { formatPrice } from '@/lib/priceTiers';
 import { fetchSiteSettings } from '@/lib/siteSettings';
+import { buildCustomerConfirmationEmail } from '@/lib/customerEmailTemplate';
 
 interface NotifyBookingRow {
   id: string;
+  transaction_id: number | null;
   player_name: string;
   player_phone: string;
   player_email: string | null;
@@ -32,7 +34,7 @@ export async function POST(request: NextRequest) {
   const { data, error } = await supabase
     .from('bookings')
     .select(
-      'id, player_name, player_phone, player_email, start_time, end_time, status, receipt_url, price, courts(name)'
+      'id, transaction_id, player_name, player_phone, player_email, start_time, end_time, status, receipt_url, price, courts(name)'
     )
     .in('id', bookingIds)
     .order('start_time', { ascending: true });
@@ -147,36 +149,41 @@ export async function POST(request: NextRequest) {
   if (first.status === 'confirmed' && first.player_email) {
     const settings = await fetchSiteSettings(supabase);
     if (settings.notify_customer_on_approval) {
-      // Optional promo/flyer attachment, admin-configured — same
-      // http(s)-URL attachment mechanism as the receipt above.
-      const marketingExt = settings.marketing_image_url?.split('.').pop()?.split(/[?#]/)[0] || 'jpg';
-      const marketingAttachment =
-        settings.attach_marketing_image && settings.marketing_image_url
-          ? [{ filename: `promo.${marketingExt}`, path: settings.marketing_image_url }]
-          : undefined;
+      // Optional attachments, both admin-configured — same http(s)-URL
+      // attachment mechanism as the admin alert's receipt above.
+      const customerAttachments: { filename: string; path: string }[] = [];
+      if (settings.attach_receipt_to_customer_email && first.receipt_url) {
+        customerAttachments.push({ filename: `receipt.${receiptExt}`, path: first.receipt_url });
+      }
+      if (settings.attach_marketing_image && settings.marketing_image_url) {
+        const marketingExt =
+          settings.marketing_image_url.split('.').pop()?.split(/[?#]/)[0] || 'jpg';
+        customerAttachments.push({ filename: `promo.${marketingExt}`, path: settings.marketing_image_url });
+      }
+
+      const { text, html } = buildCustomerConfirmationEmail({
+        playerName: first.player_name,
+        playerPhone: first.player_phone,
+        transactionId: first.transaction_id,
+        courtName,
+        dateLabel: formatDate(first.start_time),
+        slots: bookings.map((b) => ({
+          timeRange: formatSlotRange(b.start_time, b.end_time),
+          price: b.price,
+        })),
+        totalHours,
+        totalPrice: hasPrices ? total : null,
+        footerHtml: settings.customer_email_footer_html,
+      });
 
       try {
         await transporter.sendMail({
           from: credentials.gmailUser,
           to: first.player_email,
           subject: `Booking confirmed — ${courtName}${bookings.length > 1 ? ` (${bookings.length} slots)` : ''}`,
-          text: [
-            `Hi ${first.player_name},`,
-            '',
-            'Your booking is confirmed!',
-            `Court: ${courtName}`,
-            bookings.length > 1
-              ? `Date: ${formatDate(first.start_time)} (Philippine time)`
-              : `When: ${formatDate(first.start_time)}, ${formatSlotRange(first.start_time, first.end_time)} (Philippine time)`,
-            ...slotLines,
-            `Total Hours: ${totalHours}`,
-            hasPrices ? `Total: ${formatPrice(total)}` : '',
-            '',
-            'See you on the court!',
-          ]
-            .filter(Boolean)
-            .join('\n'),
-          attachments: marketingAttachment,
+          text,
+          html,
+          attachments: customerAttachments.length > 0 ? customerAttachments : undefined,
         });
       } catch (err) {
         console.error('Failed to send auto-confirm customer email:', err);

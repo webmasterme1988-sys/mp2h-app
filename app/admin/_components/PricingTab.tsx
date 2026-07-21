@@ -3,9 +3,10 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import { supabase } from '@/lib/supabase';
 import { fetchSiteSettings, DEFAULT_SITE_SETTINGS, type SiteSettings } from '@/lib/siteSettings';
-import { fetchPriceTiers, formatPrice, type PriceTier, type PricingMode } from '@/lib/priceTiers';
+import { fetchPriceTiers, type PriceTier, type PricingMode } from '@/lib/priceTiers';
 import { formatHourLabel } from '@/lib/timeSlots';
 import { uploadBrandingImage } from '@/lib/brandingStorage';
+import RichTextEditor from './RichTextEditor';
 
 const HOUR_OPTIONS = Array.from({ length: 25 }, (_, i) => i);
 
@@ -29,6 +30,13 @@ export default function PricingTab() {
   const [removeMarketingImage, setRemoveMarketingImage] = useState(false);
   const marketingImageInputRef = useRef<HTMLInputElement>(null);
 
+  const [emailFooterHtml, setEmailFooterHtml] = useState(
+    DEFAULT_SITE_SETTINGS.customer_email_footer_html ?? ''
+  );
+  const [attachReceiptToCustomerEmail, setAttachReceiptToCustomerEmail] = useState(
+    DEFAULT_SITE_SETTINGS.attach_receipt_to_customer_email
+  );
+
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState(false);
@@ -41,6 +49,10 @@ export default function PricingTab() {
   const [newTierPrice, setNewTierPrice] = useState(0);
   const [addingTier, setAddingTier] = useState(false);
   const [removingTierId, setRemovingTierId] = useState<number | null>(null);
+  const [tierEdits, setTierEdits] = useState<
+    Record<number, { start_hour: number; end_hour: number; price: number }>
+  >({});
+  const [savingTierId, setSavingTierId] = useState<number | null>(null);
 
   useEffect(() => {
     fetchSiteSettings(supabase).then((loaded) => {
@@ -51,6 +63,8 @@ export default function PricingTab() {
       setPricingMode(loaded.pricing_mode);
       setFlatPrice(loaded.flat_price);
       setAttachMarketingImage(loaded.attach_marketing_image);
+      setEmailFooterHtml(loaded.customer_email_footer_html ?? '');
+      setAttachReceiptToCustomerEmail(loaded.attach_receipt_to_customer_email);
       setLoading(false);
     });
   }, []);
@@ -114,6 +128,8 @@ export default function PricingTab() {
       flat_price: flatPrice,
       attach_marketing_image: attachMarketingImage,
       marketing_image_url: marketingImageUrl,
+      customer_email_footer_html: emailFooterHtml.trim() || null,
+      attach_receipt_to_customer_email: attachReceiptToCustomerEmail,
     });
 
     if (upsertError) {
@@ -180,6 +196,54 @@ export default function PricingTab() {
     await fetchTiers();
   }
 
+  function updateTierDraft(tier: PriceTier, field: 'start_hour' | 'end_hour' | 'price', value: number) {
+    setTierEdits((prev) => ({
+      ...prev,
+      [tier.id]: {
+        start_hour: field === 'start_hour' ? value : (prev[tier.id]?.start_hour ?? tier.start_hour),
+        end_hour: field === 'end_hour' ? value : (prev[tier.id]?.end_hour ?? tier.end_hour),
+        price: field === 'price' ? value : (prev[tier.id]?.price ?? tier.price),
+      },
+    }));
+  }
+
+  async function handleUpdateTier(id: number) {
+    const draft = tierEdits[id];
+    if (!draft) return;
+
+    setTiersError(null);
+
+    if (draft.end_hour <= draft.start_hour) {
+      setTiersError('End time must be after start time.');
+      return;
+    }
+    if (draft.price < 0) {
+      setTiersError('Price cannot be negative.');
+      return;
+    }
+
+    setSavingTierId(id);
+
+    const { error } = await supabase
+      .from('price_tiers')
+      .update({ start_hour: draft.start_hour, end_hour: draft.end_hour, price: draft.price })
+      .eq('id', id);
+
+    if (error) {
+      setTiersError(`Could not update tier: ${error.message}`);
+      setSavingTierId(null);
+      return;
+    }
+
+    setTierEdits((prev) => {
+      const next = { ...prev };
+      delete next[id];
+      return next;
+    });
+    setSavingTierId(null);
+    await fetchTiers();
+  }
+
   const currentMarketingImage =
     marketingImagePreview ?? (removeMarketingImage ? null : settings.marketing_image_url);
 
@@ -236,6 +300,24 @@ export default function PricingTab() {
                 <label className="flex items-start gap-3 cursor-pointer">
                   <input
                     type="checkbox"
+                    checked={attachReceiptToCustomerEmail}
+                    onChange={(e) => setAttachReceiptToCustomerEmail(e.target.checked)}
+                    className="mt-0.5 h-4 w-4 rounded border-slate-300 text-emerald-600 focus:ring-emerald-500"
+                  />
+                  <span>
+                    <span className="block text-sm font-medium text-slate-700">
+                      Attach the payment receipt to the confirmation email
+                    </span>
+                    <span className="block text-xs text-slate-500 mt-0.5">
+                      Sends the customer a copy of the receipt they uploaded, alongside the
+                      booking confirmation.
+                    </span>
+                  </span>
+                </label>
+
+                <label className="flex items-start gap-3 cursor-pointer">
+                  <input
+                    type="checkbox"
                     checked={attachMarketingImage}
                     onChange={(e) => setAttachMarketingImage(e.target.checked)}
                     className="mt-0.5 h-4 w-4 rounded border-slate-300 text-emerald-600 focus:ring-emerald-500"
@@ -284,6 +366,21 @@ export default function PricingTab() {
                     )}
                   </div>
                 )}
+
+                <div>
+                  <label className="block text-sm font-medium text-slate-700 mb-1">
+                    Email footer text
+                  </label>
+                  <p className="text-xs text-slate-500 mb-2">
+                    Appended to the bottom of every customer confirmation email — e.g. contact
+                    info, social links, or a cancellation policy.
+                  </p>
+                  <RichTextEditor
+                    value={emailFooterHtml}
+                    onChange={setEmailFooterHtml}
+                    placeholder="e.g. Questions? Reply to this email or call 0917-123-4567."
+                  />
+                </div>
               </div>
             )}
 
@@ -395,26 +492,78 @@ export default function PricingTab() {
               {tiers.length === 0 && (
                 <p className="text-sm text-slate-400">No tiers added yet.</p>
               )}
-              {tiers.map((tier) => (
-                <div
-                  key={tier.id}
-                  className="flex items-center gap-3 rounded-xl border border-slate-200 p-3"
-                >
-                  <p className="flex-1 text-sm text-slate-700">
-                    <span className="font-medium">
-                      {formatHourLabel(tier.start_hour)} – {formatHourLabel(tier.end_hour)}
-                    </span>{' '}
-                    <span className="text-slate-500">{formatPrice(tier.price)}</span>
-                  </p>
-                  <button
-                    onClick={() => handleRemoveTier(tier.id)}
-                    disabled={removingTierId === tier.id}
-                    className="rounded-lg bg-red-50 text-red-700 border border-red-200 text-xs font-medium px-3 py-1.5 hover:bg-red-100 disabled:opacity-40 disabled:cursor-not-allowed transition-colors shrink-0"
+              {tiers.map((tier) => {
+                const draft = tierEdits[tier.id] ?? {
+                  start_hour: tier.start_hour,
+                  end_hour: tier.end_hour,
+                  price: tier.price,
+                };
+                const isDirty =
+                  draft.start_hour !== tier.start_hour ||
+                  draft.end_hour !== tier.end_hour ||
+                  draft.price !== tier.price;
+                const isSaving = savingTierId === tier.id;
+
+                return (
+                  <div
+                    key={tier.id}
+                    className="flex flex-wrap items-center gap-2 rounded-xl border border-slate-200 p-3"
                   >
-                    {removingTierId === tier.id ? 'Removing…' : 'Remove'}
-                  </button>
-                </div>
-              ))}
+                    <select
+                      value={draft.start_hour}
+                      onChange={(e) => updateTierDraft(tier, 'start_hour', Number(e.target.value))}
+                      disabled={isSaving}
+                      className="rounded-lg border border-slate-300 px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                    >
+                      {HOUR_OPTIONS.map((h) => (
+                        <option key={h} value={h}>
+                          {formatHourLabel(h)}
+                        </option>
+                      ))}
+                    </select>
+                    <span className="text-slate-400 text-sm">–</span>
+                    <select
+                      value={draft.end_hour}
+                      onChange={(e) => updateTierDraft(tier, 'end_hour', Number(e.target.value))}
+                      disabled={isSaving}
+                      className="rounded-lg border border-slate-300 px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                    >
+                      {HOUR_OPTIONS.map((h) => (
+                        <option key={h} value={h}>
+                          {formatHourLabel(h)}
+                        </option>
+                      ))}
+                    </select>
+                    <div className="flex items-center gap-1">
+                      <span className="text-slate-500 text-sm">₱</span>
+                      <input
+                        type="number"
+                        min={0}
+                        step="0.01"
+                        value={draft.price}
+                        onChange={(e) => updateTierDraft(tier, 'price', Number(e.target.value))}
+                        disabled={isSaving}
+                        className="w-24 rounded-lg border border-slate-300 px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                      />
+                    </div>
+                    <div className="flex-1" />
+                    <button
+                      onClick={() => handleUpdateTier(tier.id)}
+                      disabled={!isDirty || isSaving}
+                      className="rounded-lg bg-emerald-600 text-white text-xs font-medium px-3 py-1.5 hover:bg-emerald-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors shrink-0"
+                    >
+                      {isSaving ? 'Saving…' : 'Save'}
+                    </button>
+                    <button
+                      onClick={() => handleRemoveTier(tier.id)}
+                      disabled={removingTierId === tier.id || isSaving}
+                      className="rounded-lg bg-red-50 text-red-700 border border-red-200 text-xs font-medium px-3 py-1.5 hover:bg-red-100 disabled:opacity-40 disabled:cursor-not-allowed transition-colors shrink-0"
+                    >
+                      {removingTierId === tier.id ? 'Removing…' : 'Remove'}
+                    </button>
+                  </div>
+                );
+              })}
             </div>
           )}
 

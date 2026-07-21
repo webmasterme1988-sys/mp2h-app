@@ -31,6 +31,16 @@ function formatDateTime(iso: string) {
   });
 }
 
+function addDays(iso: string, days: number) {
+  const d = new Date(`${iso}T00:00:00`);
+  d.setDate(d.getDate() + days);
+  return d.toISOString().split('T')[0];
+}
+
+// Blocking a wide range one day at a time would mean a lot of rows and a
+// long-running form submit — cap it to something reasonable.
+const MAX_RANGE_DAYS = 62;
+
 export default function BlockSlotsTab() {
   const [courts, setCourts] = useState<Court[]>([]);
   const [settings, setSettings] = useState<SiteSettings>(DEFAULT_SITE_SETTINGS);
@@ -40,10 +50,12 @@ export default function BlockSlotsTab() {
   const [blockedSlotsLoading, setBlockedSlotsLoading] = useState(true);
   const [blockedSlotsError, setBlockedSlotsError] = useState<string | null>(null);
   const [blockCourtId, setBlockCourtId] = useState<string | null>(null);
-  const [blockDate, setBlockDate] = useState<string>(todayISODate());
+  const [blockDateFrom, setBlockDateFrom] = useState<string>(todayISODate());
+  const [blockDateTo, setBlockDateTo] = useState<string>(todayISODate());
   const [blockHour, setBlockHour] = useState<number | null>(null);
   const [blockReason, setBlockReason] = useState('');
   const [addingBlock, setAddingBlock] = useState(false);
+  const [blockInfo, setBlockInfo] = useState<string | null>(null);
   const [removingBlockId, setRemovingBlockId] = useState<number | null>(null);
 
   const timeSlots = useMemo(
@@ -118,6 +130,23 @@ export default function BlockSlotsTab() {
     }
   }, [courts, blockCourtId]);
 
+  // Dates in the selected range that are actually open — closed days are
+  // silently skipped rather than erroring, since blocking a day that's
+  // already closed has no effect either way.
+  const targetDates = useMemo(() => {
+    if (blockDateTo < blockDateFrom) return [];
+    const dates: string[] = [];
+    for (let d = blockDateFrom; d <= blockDateTo; d = addDays(d, 1)) {
+      if (!isDateClosed(d)) dates.push(d);
+    }
+    return dates;
+  }, [blockDateFrom, blockDateTo, isDateClosed]);
+
+  function handleSelectFromDate(iso: string) {
+    setBlockDateFrom(iso);
+    if (blockDateTo < iso) setBlockDateTo(iso);
+  }
+
   async function handleAddBlock(e: React.FormEvent) {
     e.preventDefault();
     if (!blockCourtId) return;
@@ -125,29 +154,73 @@ export default function BlockSlotsTab() {
     const slot = timeSlots.find((s) => s.hour === blockHour);
     if (!slot) return;
 
-    setAddingBlock(true);
-    setBlockedSlotsError(null);
-
-    const { error } = await supabase.from('blocked_slots').insert({
-      court_id: blockCourtId,
-      start_time: slot.startISO(blockDate),
-      end_time: slot.endISO(blockDate),
-      reason: blockReason.trim() || null,
-    });
-
-    if (error) {
-      console.error('Failed to block slot:', error);
-      setBlockedSlotsError(
-        error.code === '23505'
-          ? 'That slot is already blocked.'
-          : `Could not block slot: ${error.message}`
-      );
-      setAddingBlock(false);
+    if (blockDateTo < blockDateFrom) {
+      setBlockedSlotsError('The "to" date must be on or after the "from" date.');
       return;
     }
 
-    setBlockReason('');
+    const spanDays =
+      Math.round(
+        (new Date(`${blockDateTo}T00:00:00`).getTime() -
+          new Date(`${blockDateFrom}T00:00:00`).getTime()) /
+          86400000
+      ) + 1;
+    if (spanDays > MAX_RANGE_DAYS) {
+      setBlockedSlotsError(`Please pick a range of ${MAX_RANGE_DAYS} days or fewer.`);
+      return;
+    }
+
+    if (targetDates.length === 0) {
+      setBlockedSlotsError('Every date in that range is already closed — nothing to block.');
+      return;
+    }
+
+    setAddingBlock(true);
+    setBlockedSlotsError(null);
+    setBlockInfo(null);
+
+    let blockedCount = 0;
+    let alreadyBlockedCount = 0;
+    let failedCount = 0;
+
+    // One insert per date rather than a single bulk insert, so a date
+    // that's already blocked (or any other single failure) doesn't stop
+    // the rest of the range from going through.
+    for (const date of targetDates) {
+      const { error } = await supabase.from('blocked_slots').insert({
+        court_id: blockCourtId,
+        start_time: slot.startISO(date),
+        end_time: slot.endISO(date),
+        reason: blockReason.trim() || null,
+      });
+
+      if (error) {
+        if (error.code === '23505') {
+          alreadyBlockedCount++;
+        } else {
+          console.error(`Failed to block slot on ${date}:`, error);
+          failedCount++;
+        }
+      } else {
+        blockedCount++;
+      }
+    }
+
     setAddingBlock(false);
+
+    if (failedCount > 0) {
+      setBlockedSlotsError(
+        `Blocked ${blockedCount} date${blockedCount === 1 ? '' : 's'}, but ${failedCount} failed. Please try again for the remaining date(s).`
+      );
+    } else {
+      setBlockInfo(
+        alreadyBlockedCount > 0
+          ? `Blocked ${blockedCount} new date${blockedCount === 1 ? '' : 's'} (${alreadyBlockedCount} were already blocked).`
+          : `Blocked ${blockedCount} date${blockedCount === 1 ? '' : 's'}.`
+      );
+    }
+
+    setBlockReason('');
     await fetchBlockedSlots();
   }
 
@@ -177,6 +250,7 @@ export default function BlockSlotsTab() {
       </p>
 
       {blockedSlotsError && <p className="text-sm text-red-600 mb-3">{blockedSlotsError}</p>}
+      {blockInfo && <p className="text-sm text-emerald-600 mb-3">{blockInfo}</p>}
 
       <form onSubmit={handleAddBlock} className="space-y-3 mb-5">
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
@@ -213,13 +287,32 @@ export default function BlockSlotsTab() {
         </div>
 
         <div>
-          <label className="block text-sm font-medium text-slate-600 mb-1">Date</label>
-          <DateCalendar
-            selectedDate={blockDate}
-            minDate={todayISODate()}
-            onSelect={setBlockDate}
-            isDateDisabled={isDateClosed}
-          />
+          <label className="block text-sm font-medium text-slate-600 mb-1">
+            Dates{' '}
+            <span className="text-slate-400 font-normal">
+              (pick the same date for both to block just one day)
+            </span>
+          </label>
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+            <div>
+              <p className="text-xs text-slate-500 mb-1">From</p>
+              <DateCalendar
+                selectedDate={blockDateFrom}
+                minDate={todayISODate()}
+                onSelect={handleSelectFromDate}
+                isDateDisabled={isDateClosed}
+              />
+            </div>
+            <div>
+              <p className="text-xs text-slate-500 mb-1">To</p>
+              <DateCalendar
+                selectedDate={blockDateTo}
+                minDate={blockDateFrom}
+                onSelect={setBlockDateTo}
+                isDateDisabled={isDateClosed}
+              />
+            </div>
+          </div>
         </div>
 
         <div>
@@ -237,10 +330,12 @@ export default function BlockSlotsTab() {
 
         <button
           type="submit"
-          disabled={addingBlock || !blockCourtId}
+          disabled={addingBlock || !blockCourtId || targetDates.length === 0}
           className="rounded-lg bg-emerald-600 text-white text-sm font-medium px-4 py-2.5 hover:bg-emerald-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
         >
-          {addingBlock ? 'Blocking…' : 'Block Slot'}
+          {addingBlock
+            ? 'Blocking…'
+            : `Block Slot${targetDates.length === 1 ? '' : 's'}${targetDates.length > 1 ? ` (${targetDates.length} dates)` : ''}`}
         </button>
       </form>
 

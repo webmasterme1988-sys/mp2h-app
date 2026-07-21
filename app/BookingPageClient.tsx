@@ -65,6 +65,8 @@ export default function BookingPageClient({
 
   const [submitState, setSubmitState] = useState<SubmitState>('idle');
   const [submitError, setSubmitError] = useState<string | null>(null);
+  const [lastTransactionId, setLastTransactionId] = useState<number | null>(null);
+  const [lastBookingStatus, setLastBookingStatus] = useState<'pending' | 'confirmed'>('pending');
 
   // Ticks forward every 30s so today's already-passed slots gray out live,
   // without needing the user to touch the date/court pickers to re-render.
@@ -344,7 +346,24 @@ export default function BookingPageClient({
     setSubmitError(null);
 
     try {
-      // 1. Upload receipt to Supabase Storage — one receipt covers every
+      // 1. Check the blacklist before doing anything expensive (receipt
+      // upload, transaction row). This is just a fast-fail for UX — the
+      // database also enforces it on insert via a trigger, since a
+      // determined client could skip this check entirely.
+      const { data: isBlacklisted, error: blacklistCheckError } = await supabase.rpc(
+        'is_blacklisted',
+        { check_email: playerEmail.trim(), check_phone: playerPhone.trim() }
+      );
+
+      if (blacklistCheckError) {
+        console.error('Blacklist check failed:', blacklistCheckError);
+      } else if (isBlacklisted) {
+        throw new Error(
+          'This email or phone number is not able to book at this time. Please contact us for assistance.'
+        );
+      }
+
+      // 2. Upload receipt to Supabase Storage — one receipt covers every
       // slot in this submission, since it's a single payment for all of them.
       setSubmitState('uploading');
 
@@ -366,20 +385,40 @@ export default function BookingPageClient({
       const { data: publicUrlData } = supabase.storage.from('receipts').getPublicUrl(filePath);
       const receiptUrl = publicUrlData.publicUrl;
 
-      // 2. Insert one booking row per selected slot
+      // 3. Create a transaction to group these slots under (a "receipt" of
+      // this submission, so the admin dashboard can show one row per
+      // booking attempt instead of one per hour).
       setSubmitState('saving');
+
+      const { data: transaction, error: transactionError } = await supabase
+        .from('transactions')
+        .insert({})
+        .select('id')
+        .single();
+
+      if (transactionError) {
+        throw new Error(`Booking could not be saved: ${transactionError.message}`);
+      }
+
+      // 4. Insert one booking row per selected slot, all sharing that
+      // transaction id. Auto-confirm skips the pending/approval step
+      // entirely, so the hold-time window never comes into play for these.
+      const bookingStatus: 'pending' | 'confirmed' = settings.auto_confirm_bookings
+        ? 'confirmed'
+        : 'pending';
 
       const { data: insertedBookings, error: insertError } = await supabase
         .from('bookings')
         .insert(
           selectedSlots.map((slot) => ({
             court_id: selectedCourtId,
+            transaction_id: transaction.id,
             player_name: playerName.trim(),
             player_phone: playerPhone.trim(),
             player_email: playerEmail.trim(),
             start_time: slot.startISO(selectedDate),
             end_time: slot.endISO(selectedDate),
-            status: 'pending',
+            status: bookingStatus,
             receipt_url: receiptUrl,
             price: getPrice(slot.hour),
           }))
@@ -390,12 +429,15 @@ export default function BookingPageClient({
         throw new Error(`Booking could not be saved: ${insertError.message}`);
       }
 
+      setLastTransactionId(transaction.id);
+      setLastBookingStatus(bookingStatus);
       setSubmitState('success');
       await fetchBookedSlots();
 
       // Best-effort admin email alert — the booking itself already
       // succeeded, so a notification failure shouldn't surface as an error
-      // to the customer.
+      // to the customer. When auto-confirmed, this same call also sends the
+      // customer's confirmation email (see the notify route).
       if (insertedBookings && insertedBookings.length > 0) {
         fetch('/api/bookings/notify', {
           method: 'POST',
@@ -403,13 +445,6 @@ export default function BookingPageClient({
           body: JSON.stringify({ bookingIds: insertedBookings.map((b) => b.id) }),
         }).catch((err) => console.error('Failed to trigger booking notification:', err));
       }
-
-      // Auto-close after a short confirmation pause
-      setTimeout(() => {
-        setModalOpen(false);
-        setSelectedSlots([]);
-        setSubmitState('idle');
-      }, 1800);
     } catch (err) {
       console.error(err);
       setSubmitState('error');
@@ -594,17 +629,78 @@ export default function BookingPageClient({
 
             <div className="px-5 py-4 space-y-4">
               {submitState === 'success' ? (
-                <div className="text-center py-8">
-                  <div className="w-14 h-14 rounded-full bg-emerald-100 text-emerald-600 flex items-center justify-center mx-auto mb-3 text-2xl">
-                    ✓
+                <div>
+                  <div className="text-center py-6">
+                    <div className="w-14 h-14 rounded-full bg-emerald-100 text-emerald-600 flex items-center justify-center mx-auto mb-3 text-2xl">
+                      ✓
+                    </div>
+                    <p className="font-medium text-slate-800">
+                      {lastBookingStatus === 'confirmed' ? 'Booking confirmed!' : 'Booking submitted!'}
+                    </p>
+                    <p className="text-sm text-slate-500 mt-1">
+                      {lastBookingStatus === 'confirmed'
+                        ? "You're all set — see you on the court!"
+                        : "We'll verify your payment and confirm shortly."}
+                    </p>
                   </div>
-                  <p className="font-medium text-slate-800">Booking submitted!</p>
-                  <p className="text-sm text-slate-500 mt-1">
-                    {selectedSlots.length > 1
-                      ? 'Your slots are pending confirmation. '
-                      : 'Your slot is pending confirmation. '}
-                    We&apos;ll verify your payment shortly.
-                  </p>
+
+                  <div className="rounded-xl border border-slate-200 p-4 text-sm space-y-2">
+                    {lastTransactionId !== null && (
+                      <div className="flex justify-between text-slate-500">
+                        <span>Booking Reference</span>
+                        <span className="font-medium text-slate-700">#{lastTransactionId}</span>
+                      </div>
+                    )}
+                    <div className="flex justify-between text-slate-500">
+                      <span>Court</span>
+                      <span className="font-medium text-slate-700">
+                        {courts.find((c) => c.id === selectedCourtId)?.name}
+                      </span>
+                    </div>
+                    <div className="flex justify-between text-slate-500">
+                      <span>Date</span>
+                      <span className="font-medium text-slate-700">
+                        {new Date(`${selectedDate}T00:00:00`).toLocaleDateString('en-US', {
+                          weekday: 'short',
+                          month: 'short',
+                          day: 'numeric',
+                          year: 'numeric',
+                        })}
+                      </span>
+                    </div>
+
+                    <div className="pt-2 mt-2 border-t border-slate-200 space-y-1">
+                      {selectedSlots.map((slot) => (
+                        <div key={slot.hour} className="flex justify-between text-slate-600">
+                          <span>{slot.label}</span>
+                          {settings.show_price && <span>{formatPrice(getPrice(slot.hour))}</span>}
+                        </div>
+                      ))}
+                    </div>
+
+                    <div className="flex justify-between text-slate-500 pt-2 mt-2 border-t border-slate-200">
+                      <span>Total Hours</span>
+                      <span className="font-medium text-slate-700">{selectedSlots.length}</span>
+                    </div>
+                    {settings.show_price && (
+                      <div className="flex justify-between font-semibold text-slate-800">
+                        <span>Total Paid</span>
+                        <span>{formatPrice(totalPrice)}</span>
+                      </div>
+                    )}
+                  </div>
+
+                  <button
+                    onClick={() => {
+                      setModalOpen(false);
+                      setSelectedSlots([]);
+                      setSubmitState('idle');
+                    }}
+                    style={{ backgroundColor: settings.primary_color }}
+                    className="w-full mt-4 rounded-xl text-white font-medium py-3 text-sm hover:brightness-90 transition-[filter]"
+                  >
+                    Done
+                  </button>
                 </div>
               ) : (
                 <>
@@ -627,16 +723,20 @@ export default function BookingPageClient({
                           </div>
                         )
                       )}
-                      {settings.show_price && (
-                        <div
-                          className={`flex justify-between text-sm font-semibold text-slate-800 ${
-                            selectedSlots.length > 1 ? 'mt-2 pt-2 border-t border-slate-200' : ''
-                          }`}
-                        >
-                          <span>Total</span>
-                          <span>{formatPrice(totalPrice)}</span>
-                        </div>
-                      )}
+                      <div className="mt-2 pt-2 border-t border-slate-200 space-y-1">
+                        {selectedSlots.length > 1 && (
+                          <div className="flex justify-between text-sm text-slate-600">
+                            <span>Total Hours</span>
+                            <span className="font-medium text-slate-700">{selectedSlots.length}</span>
+                          </div>
+                        )}
+                        {settings.show_price && (
+                          <div className="flex justify-between text-sm font-semibold text-slate-800">
+                            <span>Total</span>
+                            <span>{formatPrice(totalPrice)}</span>
+                          </div>
+                        )}
+                      </div>
                     </div>
                   )}
 

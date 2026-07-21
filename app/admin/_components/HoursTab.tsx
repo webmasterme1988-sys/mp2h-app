@@ -43,6 +43,9 @@ export default function HoursTab() {
   const [pendingHoldMinutes, setPendingHoldMinutes] = useState(
     DEFAULT_SITE_SETTINGS.pending_hold_minutes
   );
+  const [autoConfirmBookings, setAutoConfirmBookings] = useState(
+    DEFAULT_SITE_SETTINGS.auto_confirm_bookings
+  );
 
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -63,6 +66,7 @@ export default function HoursTab() {
       setClosingHour(loaded.closing_hour);
       setOpenDays(loaded.open_days);
       setPendingHoldMinutes(loaded.pending_hold_minutes);
+      setAutoConfirmBookings(loaded.auto_confirm_bookings);
       setLoading(false);
     });
   }, []);
@@ -98,7 +102,7 @@ export default function HoursTab() {
       setError('At least one day must be open.');
       return;
     }
-    if (pendingHoldMinutes <= 0) {
+    if (!autoConfirmBookings && pendingHoldMinutes <= 0) {
       setError('Booking hold time must be at least 1 minute.');
       return;
     }
@@ -116,6 +120,7 @@ export default function HoursTab() {
       closing_hour: closingHour,
       open_days: openDays,
       pending_hold_minutes: pendingHoldMinutes,
+      auto_confirm_bookings: autoConfirmBookings,
     });
 
     if (upsertError) {
@@ -244,7 +249,28 @@ export default function HoursTab() {
               </div>
             </div>
 
-            <div>
+            <div className="rounded-xl border border-slate-200 p-4">
+              <label className="flex items-start gap-3 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={autoConfirmBookings}
+                  onChange={(e) => setAutoConfirmBookings(e.target.checked)}
+                  className="mt-0.5 h-4 w-4 rounded border-slate-300 text-emerald-600 focus:ring-emerald-500"
+                />
+                <span>
+                  <span className="block text-sm font-medium text-slate-700">
+                    Auto-confirm bookings
+                  </span>
+                  <span className="block text-xs text-slate-500 mt-0.5">
+                    New bookings are confirmed immediately instead of waiting for admin
+                    approval. Since nothing stays &quot;pending&quot;, the hold time below no
+                    longer applies.
+                  </span>
+                </span>
+              </label>
+            </div>
+
+            <div className={autoConfirmBookings ? 'opacity-50' : undefined}>
               <label className="block text-sm font-medium text-slate-600 mb-1">
                 Booking Hold Time (minutes)
               </label>
@@ -258,7 +284,8 @@ export default function HoursTab() {
                 min={1}
                 value={pendingHoldMinutes}
                 onChange={(e) => setPendingHoldMinutes(Number(e.target.value))}
-                className="w-32 rounded-xl border border-slate-300 px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                disabled={autoConfirmBookings}
+                className="w-32 rounded-xl border border-slate-300 px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500 disabled:cursor-not-allowed disabled:bg-slate-50"
               />
             </div>
 

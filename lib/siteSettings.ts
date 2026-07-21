@@ -18,6 +18,7 @@ export interface SiteSettings {
   closing_hour: number;
   open_days: number[];
   pending_hold_minutes: number;
+  auto_confirm_bookings: boolean;
   allow_multi_slot_booking: boolean;
   show_price: boolean;
   pricing_mode: PricingMode;
@@ -40,6 +41,7 @@ export const DEFAULT_SITE_SETTINGS: SiteSettings = {
   closing_hour: DEFAULT_CLOSING_HOUR,
   open_days: ALL_DAYS_OPEN,
   pending_hold_minutes: 10,
+  auto_confirm_bookings: false,
   allow_multi_slot_booking: false,
   show_price: false,
   pricing_mode: 'flat',
@@ -48,7 +50,7 @@ export const DEFAULT_SITE_SETTINGS: SiteSettings = {
 };
 
 const SITE_SETTINGS_COLUMNS =
-  'site_title, site_subtitle, logo_url, primary_color, submit_button_label, gcash_qr_url, payment_note, opening_hour, closing_hour, open_days, pending_hold_minutes, allow_multi_slot_booking, show_price, pricing_mode, flat_price, notify_customer_on_approval';
+  'site_title, site_subtitle, logo_url, primary_color, submit_button_label, gcash_qr_url, payment_note, opening_hour, closing_hour, open_days, pending_hold_minutes, auto_confirm_bookings, allow_multi_slot_booking, show_price, pricing_mode, flat_price, notify_customer_on_approval';
 
 // Branding is a nice-to-have, not core booking functionality — if the table
 // isn't set up yet or the query fails for any reason, fall back to defaults

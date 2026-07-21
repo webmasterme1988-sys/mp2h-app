@@ -2,6 +2,7 @@ import { NextResponse, type NextRequest } from 'next/server';
 import { createPublicServerClient } from '@/lib/supabase/publicServerClient';
 import { getMailTransporter } from '@/lib/mailer';
 import { formatPrice } from '@/lib/priceTiers';
+import { fetchSiteSettings } from '@/lib/siteSettings';
 
 interface NotifyBookingRow {
   id: string;
@@ -118,6 +119,40 @@ export async function POST(request: NextRequest) {
   } catch (err) {
     console.error('Failed to send booking notification email:', err);
     return NextResponse.json({ error: 'Could not send notification email.' }, { status: 500 });
+  }
+
+  // Auto-confirm mode skips the manual approval step entirely, so there's
+  // no separate "Approve" click to trigger the customer's confirmation
+  // email from — send it right away instead. Best-effort: the admin alert
+  // above already succeeded, so a failure here shouldn't fail the request.
+  if (first.status === 'confirmed' && first.player_email) {
+    const settings = await fetchSiteSettings(supabase);
+    if (settings.notify_customer_on_approval) {
+      try {
+        await transporter.sendMail({
+          from: process.env.GMAIL_USER,
+          to: first.player_email,
+          subject: `Booking confirmed — ${courtName}${bookings.length > 1 ? ` (${bookings.length} slots)` : ''}`,
+          text: [
+            `Hi ${first.player_name},`,
+            '',
+            'Your booking is confirmed!',
+            `Court: ${courtName}`,
+            bookings.length > 1
+              ? `Date: ${formatWhen(first.start_time).split(',').slice(0, 2).join(',')} (Philippine time)`
+              : `When: ${formatWhen(first.start_time)} (Philippine time)`,
+            ...slotLines,
+            hasPrices ? `Total: ${formatPrice(total)}` : '',
+            '',
+            'See you on the court!',
+          ]
+            .filter(Boolean)
+            .join('\n'),
+        });
+      } catch (err) {
+        console.error('Failed to send auto-confirm customer email:', err);
+      }
+    }
   }
 
   return NextResponse.json({ success: true });

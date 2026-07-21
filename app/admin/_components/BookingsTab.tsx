@@ -11,10 +11,12 @@ import { fetchPriceTiers, getSlotPrice, formatPrice, type PriceTier } from '@/li
 type BookingStatus = 'pending' | 'confirmed' | 'cancelled';
 type DateFilterMode = 'all' | 'today' | 'week' | 'month' | 'custom';
 type StatusFilter = 'all' | BookingStatus;
+type SortColumn = 'player' | 'phone' | 'transaction' | 'date' | 'court' | 'hours' | 'price' | 'status';
 
 interface Booking {
   id: string;
   court_id: string;
+  transaction_id: number | null;
   player_name: string;
   player_phone: string;
   player_email: string | null;
@@ -32,6 +34,22 @@ interface Court {
   name: string;
 }
 
+interface TransactionGroup {
+  key: string;
+  transactionId: number | null;
+  bookings: Booking[];
+  playerName: string;
+  playerPhone: string;
+  playerEmail: string | null;
+  courtName: string;
+  createdAt: string;
+  totalHours: number;
+  totalPrice: number | null;
+  status: BookingStatus | 'mixed';
+  receiptUrl: string | null;
+  hasHoldExpired: boolean;
+}
+
 function formatDateTime(iso: string) {
   return new Date(iso).toLocaleString('en-US', {
     month: 'short',
@@ -40,6 +58,18 @@ function formatDateTime(iso: string) {
     hour: 'numeric',
     minute: '2-digit',
   });
+}
+
+// "6:00 AM - 7:00 AM" for a single booked slot — pinned to Philippine time
+// so it's correct regardless of what timezone the admin's browser is in.
+function formatSlotTimeRange(startIso: string, endIso: string) {
+  const fmt = (iso: string) =>
+    new Date(iso).toLocaleTimeString('en-US', {
+      hour: 'numeric',
+      minute: '2-digit',
+      timeZone: 'Asia/Manila',
+    });
+  return `${fmt(startIso)} - ${fmt(endIso)}`;
 }
 
 // The slot's calendar date as experienced in the Philippines, not whatever
@@ -86,10 +116,11 @@ function getPresetRange(mode: DateFilterMode): { from: string; to: string } {
   return { from: '', to: '' };
 }
 
-const STATUS_STYLES: Record<BookingStatus, string> = {
+const STATUS_STYLES: Record<BookingStatus | 'mixed', string> = {
   pending: 'bg-amber-100 text-amber-700',
   confirmed: 'bg-emerald-100 text-emerald-700',
   cancelled: 'bg-red-100 text-red-700',
+  mixed: 'bg-slate-100 text-slate-600',
 };
 
 export default function BookingsTab() {
@@ -114,6 +145,19 @@ export default function BookingsTab() {
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
   const [courtFilter, setCourtFilter] = useState<string>('all');
   const [phoneSearch, setPhoneSearch] = useState('');
+
+  // ---------- Sorting ----------
+  const [sortColumn, setSortColumn] = useState<SortColumn | null>(null);
+  const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('asc');
+
+  // ---------- Details modal ----------
+  const [detailsKey, setDetailsKey] = useState<string | null>(null);
+
+  // ---------- Bulk actions ----------
+  const [bulkUpdatingKey, setBulkUpdatingKey] = useState<string | null>(null);
+  const [bulkActionError, setBulkActionError] = useState<{ key: string; message: string } | null>(
+    null
+  );
 
   useEffect(() => {
     fetchSiteSettings(supabase).then(setSettings);
@@ -188,7 +232,7 @@ export default function BookingsTab() {
     const { data, error } = await supabase
       .from('bookings')
       .select(
-        'id, court_id, player_name, player_phone, player_email, start_time, end_time, status, receipt_url, created_at, price, courts(name)'
+        'id, court_id, transaction_id, player_name, player_phone, player_email, start_time, end_time, status, receipt_url, created_at, price, courts(name)'
       )
       .order('id', { ascending: false });
 
@@ -207,12 +251,140 @@ export default function BookingsTab() {
     fetchBookings();
   }, [fetchBookings]);
 
+  // New-booking notifications (toast + nav badge) live in the parent
+  // AdminPage instead of here, since it stays mounted across tab switches
+  // and this component doesn't. Refetch when the admin returns to this tab
+  // after being away, so it stays in sync with whatever came in meanwhile.
+  useEffect(() => {
+    const channel = supabase
+      .channel('bookings-tab-refetch')
+      .on(
+        'postgres_changes',
+        { event: 'INSERT', schema: 'public', table: 'bookings' },
+        () => fetchBookings()
+      )
+      .subscribe();
+
+    return () => {
+      supabase.removeChannel(channel);
+    };
+  }, [fetchBookings]);
+
   function isHoldExpired(booking: Booking) {
     if (booking.status !== 'pending') return false;
     return now - new Date(booking.created_at).getTime() > settings.pending_hold_minutes * 60 * 1000;
   }
 
-  async function updateStatus(bookingId: string, status: BookingStatus) {
+  // ---------- Group bookings into transactions ----------
+
+  const transactionGroups = useMemo<TransactionGroup[]>(() => {
+    const map = new Map<string, Booking[]>();
+    for (const b of filteredBookings) {
+      // Bookings from before the transaction_id column existed each get
+      // their own singleton group, keyed by their own id.
+      const key = b.transaction_id !== null ? `t-${b.transaction_id}` : `legacy-${b.id}`;
+      const existing = map.get(key);
+      if (existing) {
+        existing.push(b);
+      } else {
+        map.set(key, [b]);
+      }
+    }
+
+    const groups: TransactionGroup[] = [];
+    for (const [key, groupBookings] of map) {
+      const sorted = [...groupBookings].sort(
+        (a, b) => new Date(a.start_time).getTime() - new Date(b.start_time).getTime()
+      );
+      const first = sorted[0];
+      const statuses = new Set(sorted.map((b) => b.status));
+      const status: BookingStatus | 'mixed' = statuses.size === 1 ? sorted[0].status : 'mixed';
+      const anyPriceMissing = sorted.some((b) => b.price === null);
+      const totalPrice = anyPriceMissing ? null : sorted.reduce((sum, b) => sum + (b.price ?? 0), 0);
+      const createdAt = sorted.reduce(
+        (min, b) => (b.created_at < min ? b.created_at : min),
+        sorted[0].created_at
+      );
+
+      groups.push({
+        key,
+        transactionId: first.transaction_id,
+        bookings: sorted,
+        playerName: first.player_name,
+        playerPhone: first.player_phone,
+        playerEmail: first.player_email,
+        courtName: first.courts?.name ?? '—',
+        createdAt,
+        totalHours: sorted.length,
+        totalPrice,
+        status,
+        receiptUrl: first.receipt_url,
+        hasHoldExpired: sorted.some((b) => isHoldExpired(b)),
+      });
+    }
+    return groups;
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [filteredBookings, now, settings.pending_hold_minutes]);
+
+  function handleSort(column: SortColumn) {
+    if (sortColumn === column) {
+      setSortDirection((d) => (d === 'asc' ? 'desc' : 'asc'));
+    } else {
+      setSortColumn(column);
+      setSortDirection('asc');
+    }
+  }
+
+  const sortedGroups = useMemo(() => {
+    if (!sortColumn) return transactionGroups;
+    const sorted = [...transactionGroups].sort((a, b) => {
+      let cmp = 0;
+      switch (sortColumn) {
+        case 'player':
+          cmp = a.playerName.localeCompare(b.playerName);
+          break;
+        case 'phone':
+          cmp = a.playerPhone.localeCompare(b.playerPhone);
+          break;
+        case 'transaction':
+          cmp = (a.transactionId ?? 0) - (b.transactionId ?? 0);
+          break;
+        case 'date':
+          cmp = new Date(a.createdAt).getTime() - new Date(b.createdAt).getTime();
+          break;
+        case 'court':
+          cmp = a.courtName.localeCompare(b.courtName);
+          break;
+        case 'hours':
+          cmp = a.totalHours - b.totalHours;
+          break;
+        case 'price':
+          cmp = (a.totalPrice ?? 0) - (b.totalPrice ?? 0);
+          break;
+        case 'status':
+          cmp = a.status.localeCompare(b.status);
+          break;
+      }
+      return sortDirection === 'asc' ? cmp : -cmp;
+    });
+    return sorted;
+  }, [transactionGroups, sortColumn, sortDirection]);
+
+  const detailsGroup = sortedGroups.find((g) => g.key === detailsKey) ?? null;
+
+  function SortHeader({ column, children }: { column: SortColumn; children: React.ReactNode }) {
+    const isActive = sortColumn === column;
+    return (
+      <th
+        onClick={() => handleSort(column)}
+        className="px-4 sm:px-6 py-3 cursor-pointer select-none hover:text-slate-700 whitespace-nowrap"
+      >
+        {children} {isActive && (sortDirection === 'asc' ? '▲' : '▼')}
+      </th>
+    );
+  }
+
+  async function updateStatus(bookingId: string, status: BookingStatus): Promise<boolean> {
     setUpdatingId(bookingId);
     setActionError(null);
 
@@ -240,7 +412,7 @@ export default function BookingsTab() {
             message: 'Could not verify slot availability. Please try again.',
           });
           setUpdatingId(null);
-          return;
+          return false;
         }
 
         if (conflicts && conflicts.length > 0) {
@@ -250,7 +422,7 @@ export default function BookingsTab() {
               'This slot is already confirmed for another booking. Reject this one, or reschedule it instead.',
           });
           setUpdatingId(null);
-          return;
+          return false;
         }
       }
     }
@@ -261,7 +433,7 @@ export default function BookingsTab() {
       console.error(`Failed to set booking ${bookingId} to ${status}:`, error);
       setActionError({ bookingId, message: `Could not update status: ${error.message}` });
       setUpdatingId(null);
-      return;
+      return false;
     }
 
     setBookings((prev) => prev.map((b) => (b.id === bookingId ? { ...b, status } : b)));
@@ -276,6 +448,30 @@ export default function BookingsTab() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ bookingId }),
       }).catch((err) => console.error('Failed to trigger confirmation email:', err));
+    }
+
+    return true;
+  }
+
+  async function handleBulkAction(group: TransactionGroup, targetStatus: BookingStatus) {
+    setBulkUpdatingKey(group.key);
+    setBulkActionError(null);
+
+    const targets = group.bookings.filter((b) => b.status !== targetStatus);
+    let failures = 0;
+
+    for (const booking of targets) {
+      const ok = await updateStatus(booking.id, targetStatus);
+      if (!ok) failures++;
+    }
+
+    setBulkUpdatingKey(null);
+
+    if (failures > 0) {
+      setBulkActionError({
+        key: group.key,
+        message: `${failures} of ${targets.length} slot(s) couldn't be updated — open View Details to resolve individually.`,
+      });
     }
   }
 
@@ -498,7 +694,7 @@ export default function BookingsTab() {
           <p className="text-sm text-slate-400 px-4 sm:px-6 py-6">Loading bookings…</p>
         ) : bookings.length === 0 ? (
           <p className="text-sm text-slate-400 px-4 sm:px-6 py-6">No bookings yet.</p>
-        ) : filteredBookings.length === 0 ? (
+        ) : sortedGroups.length === 0 ? (
           <p className="text-sm text-slate-400 px-4 sm:px-6 py-6">
             No bookings match your filters.
           </p>
@@ -507,97 +703,92 @@ export default function BookingsTab() {
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b border-slate-200 text-left text-xs font-medium text-slate-500 uppercase tracking-wide">
-                  <th className="px-4 sm:px-6 py-3">Player</th>
-                  <th className="px-4 sm:px-6 py-3">Phone</th>
-                  <th className="px-4 sm:px-6 py-3">Date &amp; Time</th>
-                  <th className="px-4 sm:px-6 py-3">Court</th>
-                  {settings.show_price && <th className="px-4 sm:px-6 py-3">Price</th>}
-                  <th className="px-4 sm:px-6 py-3">Status</th>
-                  <th className="px-4 sm:px-6 py-3">Receipt</th>
+                  <SortHeader column="player">Player</SortHeader>
+                  <SortHeader column="phone">Phone</SortHeader>
+                  <SortHeader column="transaction">Transaction #</SortHeader>
+                  <SortHeader column="date">Date &amp; Time</SortHeader>
+                  <SortHeader column="court">Court</SortHeader>
+                  <SortHeader column="hours">Total Hours</SortHeader>
+                  {settings.show_price && <SortHeader column="price">Price</SortHeader>}
+                  <SortHeader column="status">Status</SortHeader>
+                  <th className="px-4 sm:px-6 py-3">Details</th>
                   <th className="px-4 sm:px-6 py-3">Actions</th>
                 </tr>
               </thead>
               <tbody>
-                {filteredBookings.map((booking) => {
-                  const isUpdating = updatingId === booking.id;
+                {sortedGroups.map((group) => {
+                  const isBulkUpdating = bulkUpdatingKey === group.key;
                   return (
-                    <tr key={booking.id} className="border-b border-slate-100 last:border-0">
+                    <tr key={group.key} className="border-b border-slate-100 last:border-0">
                       <td className="px-4 sm:px-6 py-3 font-medium text-slate-800 whitespace-nowrap">
-                        {booking.player_name}
+                        {group.playerName}
                       </td>
                       <td className="px-4 sm:px-6 py-3 text-slate-600 whitespace-nowrap">
-                        <div>{booking.player_phone}</div>
-                        {booking.player_email && (
-                          <div className="text-xs text-slate-400">{booking.player_email}</div>
+                        <div>{group.playerPhone}</div>
+                        {group.playerEmail && (
+                          <div className="text-xs text-slate-400">{group.playerEmail}</div>
                         )}
                       </td>
                       <td className="px-4 sm:px-6 py-3 text-slate-600 whitespace-nowrap">
-                        {formatDateTime(booking.start_time)}
+                        {group.transactionId !== null ? `#${group.transactionId}` : '—'}
                       </td>
                       <td className="px-4 sm:px-6 py-3 text-slate-600 whitespace-nowrap">
-                        {booking.courts?.name ?? '—'}
+                        {formatDateTime(group.createdAt)}
+                      </td>
+                      <td className="px-4 sm:px-6 py-3 text-slate-600 whitespace-nowrap">
+                        {group.courtName}
+                      </td>
+                      <td className="px-4 sm:px-6 py-3 text-slate-600 whitespace-nowrap">
+                        {group.totalHours}
                       </td>
                       {settings.show_price && (
                         <td className="px-4 sm:px-6 py-3 text-slate-600 whitespace-nowrap">
-                          {booking.price !== null ? formatPrice(booking.price) : '—'}
+                          {group.totalPrice !== null ? formatPrice(group.totalPrice) : '—'}
                         </td>
                       )}
                       <td className="px-4 sm:px-6 py-3 whitespace-nowrap">
                         <span
-                          className={`inline-block rounded-full px-2.5 py-1 text-xs font-medium capitalize ${STATUS_STYLES[booking.status]}`}
+                          className={`inline-block rounded-full px-2.5 py-1 text-xs font-medium capitalize ${STATUS_STYLES[group.status]}`}
                         >
-                          {booking.status}
+                          {group.status}
                         </span>
-                        {isHoldExpired(booking) && (
+                        {group.hasHoldExpired && (
                           <span
                             className="block text-[11px] text-amber-600 mt-1"
-                            title="This slot may already be booked by someone else."
+                            title="One or more slots may already be booked by someone else."
                           >
                             Hold expired
                           </span>
                         )}
                       </td>
                       <td className="px-4 sm:px-6 py-3 whitespace-nowrap">
-                        {booking.receipt_url ? (
-                          <button
-                            onClick={() => setReceiptModalUrl(booking.receipt_url)}
-                            className="text-emerald-700 hover:text-emerald-800 font-medium underline underline-offset-2"
-                          >
-                            View
-                          </button>
-                        ) : (
-                          <span className="text-slate-300">—</span>
-                        )}
+                        <button
+                          onClick={() => setDetailsKey(group.key)}
+                          className="rounded-lg bg-slate-100 text-slate-700 border border-slate-200 text-xs font-medium px-3 py-1.5 hover:bg-slate-200 transition-colors"
+                        >
+                          View Details
+                        </button>
                       </td>
                       <td className="px-4 sm:px-6 py-3">
                         <div className="flex gap-2 whitespace-nowrap">
                           <button
-                            onClick={() => updateStatus(booking.id, 'confirmed')}
-                            disabled={isUpdating || booking.status === 'confirmed'}
+                            onClick={() => handleBulkAction(group, 'confirmed')}
+                            disabled={isBulkUpdating || group.status === 'confirmed'}
                             className="rounded-lg bg-emerald-600 text-white text-xs font-medium px-3 py-1.5 hover:bg-emerald-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
                           >
                             Approve
                           </button>
                           <button
-                            onClick={() => updateStatus(booking.id, 'cancelled')}
-                            disabled={isUpdating || booking.status === 'cancelled'}
+                            onClick={() => handleBulkAction(group, 'cancelled')}
+                            disabled={isBulkUpdating || group.status === 'cancelled'}
                             className="rounded-lg bg-red-50 text-red-700 border border-red-200 text-xs font-medium px-3 py-1.5 hover:bg-red-100 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
                           >
                             Reject
                           </button>
-                          {booking.status !== 'cancelled' && (
-                            <button
-                              onClick={() => openReschedule(booking)}
-                              disabled={isUpdating}
-                              className="rounded-lg bg-slate-100 text-slate-700 border border-slate-200 text-xs font-medium px-3 py-1.5 hover:bg-slate-200 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
-                            >
-                              Reschedule
-                            </button>
-                          )}
                         </div>
-                        {actionError?.bookingId === booking.id && (
+                        {bulkActionError?.key === group.key && (
                           <p className="text-xs text-red-600 mt-1.5 max-w-xs whitespace-normal">
-                            {actionError.message}
+                            {bulkActionError.message}
                           </p>
                         )}
                       </td>
@@ -636,6 +827,128 @@ export default function BookingsTab() {
                 alt="GCash payment receipt"
                 className="w-full h-auto rounded-lg border border-slate-200"
               />
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Transaction Details Modal */}
+      {detailsGroup && (
+        <div
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4"
+          onClick={() => setDetailsKey(null)}
+        >
+          <div
+            className="bg-white rounded-2xl max-w-lg w-full max-h-[90vh] overflow-y-auto"
+            onClick={(e) => e.stopPropagation()}
+          >
+            <div className="sticky top-0 bg-white border-b border-slate-200 px-5 py-4 flex items-center justify-between">
+              <div>
+                <h3 className="font-semibold text-slate-800">
+                  Transaction {detailsGroup.transactionId !== null ? `#${detailsGroup.transactionId}` : ''}
+                </h3>
+                <p className="text-xs text-slate-500 mt-0.5">
+                  {detailsGroup.playerName} · {detailsGroup.courtName} ·{' '}
+                  {formatDateTime(detailsGroup.createdAt)}
+                </p>
+              </div>
+              <button
+                onClick={() => setDetailsKey(null)}
+                className="text-slate-400 hover:text-slate-600 text-xl leading-none px-2"
+                aria-label="Close"
+              >
+                ×
+              </button>
+            </div>
+
+            <div className="p-5 space-y-4">
+              <div className="flex items-center justify-between text-sm">
+                <span className="text-slate-600">
+                  {detailsGroup.totalHours} hour{detailsGroup.totalHours !== 1 ? 's' : ''} booked
+                </span>
+                {settings.show_price && detailsGroup.totalPrice !== null && (
+                  <span className="font-semibold text-slate-800">
+                    Total: {formatPrice(detailsGroup.totalPrice)}
+                  </span>
+                )}
+              </div>
+
+              {detailsGroup.receiptUrl ? (
+                <button
+                  onClick={() => {
+                    const url = detailsGroup.receiptUrl;
+                    setDetailsKey(null);
+                    setReceiptModalUrl(url);
+                  }}
+                  className="text-emerald-700 hover:text-emerald-800 text-sm font-medium underline underline-offset-2"
+                >
+                  View Receipt
+                </button>
+              ) : (
+                <p className="text-sm text-slate-400">No receipt uploaded.</p>
+              )}
+
+              <div className="space-y-2">
+                {detailsGroup.bookings.map((booking) => {
+                  const isUpdatingThis = updatingId === booking.id;
+                  return (
+                    <div key={booking.id} className="rounded-xl border border-slate-200 p-3">
+                      <div className="flex items-start justify-between gap-3">
+                        <div>
+                          <p className="text-sm font-medium text-slate-800">
+                            {formatSlotTimeRange(booking.start_time, booking.end_time)}
+                          </p>
+                          <span
+                            className={`inline-block rounded-full px-2 py-0.5 text-xs font-medium capitalize mt-1 ${STATUS_STYLES[booking.status]}`}
+                          >
+                            {booking.status}
+                          </span>
+                          {isHoldExpired(booking) && (
+                            <span className="block text-[11px] text-amber-600 mt-1">
+                              Hold expired
+                            </span>
+                          )}
+                        </div>
+                        {settings.show_price && booking.price !== null && (
+                          <span className="text-sm text-slate-600 shrink-0">
+                            {formatPrice(booking.price)}
+                          </span>
+                        )}
+                      </div>
+
+                      <div className="flex gap-2 mt-2">
+                        <button
+                          onClick={() => updateStatus(booking.id, 'confirmed')}
+                          disabled={isUpdatingThis || booking.status === 'confirmed'}
+                          className="rounded-lg bg-emerald-600 text-white text-xs font-medium px-3 py-1.5 hover:bg-emerald-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                        >
+                          Approve
+                        </button>
+                        <button
+                          onClick={() => updateStatus(booking.id, 'cancelled')}
+                          disabled={isUpdatingThis || booking.status === 'cancelled'}
+                          className="rounded-lg bg-red-50 text-red-700 border border-red-200 text-xs font-medium px-3 py-1.5 hover:bg-red-100 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                        >
+                          Reject
+                        </button>
+                        {booking.status !== 'cancelled' && (
+                          <button
+                            onClick={() => openReschedule(booking)}
+                            disabled={isUpdatingThis}
+                            className="rounded-lg bg-slate-100 text-slate-700 border border-slate-200 text-xs font-medium px-3 py-1.5 hover:bg-slate-200 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                          >
+                            Reschedule
+                          </button>
+                        )}
+                      </div>
+
+                      {actionError?.bookingId === booking.id && (
+                        <p className="text-xs text-red-600 mt-1.5">{actionError.message}</p>
+                      )}
+                    </div>
+                  );
+                })}
+              </div>
             </div>
           </div>
         </div>

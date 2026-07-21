@@ -104,7 +104,7 @@ export default function ChangePasswordModal({ onClose }: { onClose: () => void }
               <button
                 type="submit"
                 disabled={saving}
-                className="w-full rounded-xl bg-emerald-600 text-white font-medium py-2.5 text-sm hover:bg-emerald-700 disabled:opacity-60 disabled:cursor-not-allowed transition-colors"
+                className="w-full rounded-xl bg-[var(--admin-btn-bg)] text-[var(--admin-btn-label)] font-medium py-2.5 text-sm hover:brightness-90 disabled:opacity-60 disabled:cursor-not-allowed transition-colors"
               >
                 {saving ? 'Saving…' : 'Update Password'}
               </button>

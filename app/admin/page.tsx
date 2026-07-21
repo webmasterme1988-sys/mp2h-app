@@ -185,8 +185,18 @@ export default function AdminPage() {
 
   const visibleTabs = TABS.filter((tab) => !tab.superAdminOnly || isSuperAdmin);
 
+  // CSS variables rather than passing colors down as props — every admin
+  // tab's "primary action" buttons (Save, Add, Approve, etc.) reference
+  // these via Tailwind's arbitrary-value syntax (bg-[var(--admin-btn-bg)]),
+  // so the whole dashboard picks up the setting without each component
+  // needing to fetch site_settings itself.
+  const adminThemeVars = {
+    '--admin-btn-bg': settings.button_bg_color,
+    '--admin-btn-label': settings.button_label_color,
+  } as React.CSSProperties;
+
   return (
-    <div className="min-h-screen bg-slate-50">
+    <div className="min-h-screen bg-slate-50" style={adminThemeVars}>
       {toasts.length > 0 && (
         <div className="fixed top-4 right-4 z-[60] space-y-2 w-72">
           {toasts.map((toast) => (

@@ -134,7 +134,7 @@ export default function CourtsTab() {
                 <button
                   onClick={() => handleRenameCourt(court.id)}
                   disabled={isSaving || !draftName.trim() || draftName === court.name}
-                  className="rounded-lg bg-emerald-600 text-white text-xs font-medium px-3 py-2 hover:bg-emerald-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                  className="rounded-lg bg-[var(--admin-btn-bg)] text-[var(--admin-btn-label)] text-xs font-medium px-3 py-2 hover:brightness-90 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
                 >
                   Save
                 </button>
@@ -162,7 +162,7 @@ export default function CourtsTab() {
         <button
           type="submit"
           disabled={addingCourt || !newCourtName.trim()}
-          className="rounded-lg bg-emerald-600 text-white text-xs font-medium px-4 py-2 hover:bg-emerald-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+          className="rounded-lg bg-[var(--admin-btn-bg)] text-[var(--admin-btn-label)] text-xs font-medium px-4 py-2 hover:brightness-90 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
         >
           {addingCourt ? 'Adding…' : 'Add Court'}
         </button>

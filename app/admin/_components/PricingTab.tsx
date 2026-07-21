@@ -476,7 +476,7 @@ export default function PricingTab() {
             <button
               type="submit"
               disabled={saving}
-              className="rounded-xl bg-emerald-600 text-white font-medium px-6 py-2.5 text-sm hover:bg-emerald-700 disabled:opacity-60 disabled:cursor-not-allowed transition-colors"
+              className="rounded-xl bg-[var(--admin-btn-bg)] text-[var(--admin-btn-label)] font-medium px-6 py-2.5 text-sm hover:brightness-90 disabled:opacity-60 disabled:cursor-not-allowed transition-colors"
             >
               {saving ? 'Saving…' : 'Save Changes'}
             </button>
@@ -559,7 +559,7 @@ export default function PricingTab() {
                     <button
                       onClick={() => handleUpdateTier(tier.id)}
                       disabled={!isDirty || isSaving}
-                      className="rounded-lg bg-emerald-600 text-white text-xs font-medium px-3 py-1.5 hover:bg-emerald-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors shrink-0"
+                      className="rounded-lg bg-[var(--admin-btn-bg)] text-[var(--admin-btn-label)] text-xs font-medium px-3 py-1.5 hover:brightness-90 disabled:opacity-40 disabled:cursor-not-allowed transition-colors shrink-0"
                     >
                       {isSaving ? 'Saving…' : 'Save'}
                     </button>
@@ -625,7 +625,7 @@ export default function PricingTab() {
             <button
               type="submit"
               disabled={addingTier}
-              className="rounded-lg bg-emerald-600 text-white text-sm font-medium px-4 py-2.5 hover:bg-emerald-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+              className="rounded-lg bg-[var(--admin-btn-bg)] text-[var(--admin-btn-label)] text-sm font-medium px-4 py-2.5 hover:brightness-90 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
             >
               {addingTier ? 'Adding…' : 'Add Tier'}
             </button>

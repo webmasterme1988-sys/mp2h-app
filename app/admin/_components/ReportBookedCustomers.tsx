@@ -323,7 +323,7 @@ export default function ReportBookedCustomers() {
         <button
           onClick={handlePreview}
           disabled={loading}
-          className="rounded-xl bg-emerald-600 text-white text-sm font-medium px-4 py-2.5 hover:bg-emerald-700 disabled:opacity-60 disabled:cursor-not-allowed transition-colors"
+          className="rounded-xl bg-[var(--admin-btn-bg)] text-[var(--admin-btn-label)] text-sm font-medium px-4 py-2.5 hover:brightness-90 disabled:opacity-60 disabled:cursor-not-allowed transition-colors"
         >
           {loading ? 'Loading…' : 'Preview'}
         </button>

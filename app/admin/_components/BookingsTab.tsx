@@ -781,7 +781,7 @@ export default function BookingsTab() {
                           <button
                             onClick={() => handleBulkAction(group, 'confirmed')}
                             disabled={isBulkUpdating || group.status === 'confirmed'}
-                            className="rounded-lg bg-emerald-600 text-white text-xs font-medium px-3 py-1.5 hover:bg-emerald-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                            className="rounded-lg bg-[var(--admin-btn-bg)] text-[var(--admin-btn-label)] text-xs font-medium px-3 py-1.5 hover:brightness-90 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
                           >
                             Approve
                           </button>
@@ -927,7 +927,7 @@ export default function BookingsTab() {
                         <button
                           onClick={() => updateStatus(booking.id, 'confirmed')}
                           disabled={isUpdatingThis || booking.status === 'confirmed'}
-                          className="rounded-lg bg-emerald-600 text-white text-xs font-medium px-3 py-1.5 hover:bg-emerald-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                          className="rounded-lg bg-[var(--admin-btn-bg)] text-[var(--admin-btn-label)] text-xs font-medium px-3 py-1.5 hover:brightness-90 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
                         >
                           Approve
                         </button>
@@ -1027,7 +1027,7 @@ export default function BookingsTab() {
               <button
                 onClick={handleConfirmReschedule}
                 disabled={rescheduleSaving || rescheduleLoadingConflicts || rescheduleHour === null}
-                className="w-full rounded-xl bg-emerald-600 text-white font-medium py-2.5 text-sm hover:bg-emerald-700 disabled:opacity-60 disabled:cursor-not-allowed transition-colors"
+                className="w-full rounded-xl bg-[var(--admin-btn-bg)] text-[var(--admin-btn-label)] font-medium py-2.5 text-sm hover:brightness-90 disabled:opacity-60 disabled:cursor-not-allowed transition-colors"
               >
                 {rescheduleSaving ? 'Saving…' : 'Confirm Reschedule'}
               </button>

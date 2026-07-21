@@ -180,7 +180,7 @@ export default function BlacklistTab() {
         <button
           type="submit"
           disabled={adding || (!newEmail.trim() && !newPhone.trim())}
-          className="rounded-lg bg-emerald-600 text-white text-sm font-medium px-4 py-2.5 hover:bg-emerald-700 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+          className="rounded-lg bg-[var(--admin-btn-bg)] text-[var(--admin-btn-label)] text-sm font-medium px-4 py-2.5 hover:brightness-90 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
         >
           {adding ? 'Adding…' : 'Add to Blacklist'}
         </button>

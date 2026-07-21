@@ -13,6 +13,7 @@ type StatusFilter = 'all' | BookingStatus;
 interface ReportRow {
   id: string;
   transactionId: number | null;
+  transactionDateTime: string;
   playerName: string;
   playerPhone: string;
   playerEmail: string | null;
@@ -83,6 +84,19 @@ function formatSlotTimeRange(startIso: string, endIso: string) {
   return `${fmt(startIso)} - ${fmt(endIso)}`;
 }
 
+// When the booking transaction was actually made — distinct from Date/Time
+// above, which is the court slot the customer booked.
+function formatTransactionDateTime(iso: string) {
+  return new Date(iso).toLocaleString('en-US', {
+    timeZone: 'Asia/Manila',
+    month: 'short',
+    day: 'numeric',
+    year: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+  });
+}
+
 const STATUS_STYLES: Record<BookingStatus, string> = {
   pending: 'bg-amber-100 text-amber-700',
   confirmed: 'bg-emerald-100 text-emerald-700',
@@ -135,7 +149,7 @@ export default function ReportBookedCustomers() {
     let query = supabase
       .from('bookings')
       .select(
-        'id, transaction_id, player_name, player_phone, player_email, start_time, end_time, status, price, courts(name)'
+        'id, transaction_id, player_name, player_phone, player_email, start_time, end_time, status, price, created_at, courts(name)'
       )
       .order('start_time', { ascending: false });
 
@@ -160,6 +174,7 @@ export default function ReportBookedCustomers() {
       end_time: string;
       status: BookingStatus;
       price: number | null;
+      created_at: string;
       courts: { name: string } | null;
     };
 
@@ -174,6 +189,7 @@ export default function ReportBookedCustomers() {
       .map((b) => ({
         id: b.id,
         transactionId: b.transaction_id,
+        transactionDateTime: formatTransactionDateTime(b.created_at),
         playerName: b.player_name,
         playerPhone: b.player_phone,
         playerEmail: b.player_email,
@@ -209,6 +225,7 @@ export default function ReportBookedCustomers() {
       `booked-customers-${todayPH()}.csv`,
       result.map((r) => ({
         'Transaction #': r.transactionId !== null ? r.transactionId : '',
+        'Transaction Date/Time': r.transactionDateTime,
         Player: r.playerName,
         Phone: r.playerPhone,
         Email: r.playerEmail ?? '',
@@ -348,6 +365,7 @@ export default function ReportBookedCustomers() {
                     <th className="px-4 py-2.5">Phone</th>
                     <th className="px-4 py-2.5">Email</th>
                     <th className="px-4 py-2.5">Transaction #</th>
+                    <th className="px-4 py-2.5">Transaction Date/Time</th>
                     <th className="px-4 py-2.5">Court</th>
                     <th className="px-4 py-2.5">Date</th>
                     <th className="px-4 py-2.5">Time</th>
@@ -369,6 +387,9 @@ export default function ReportBookedCustomers() {
                       </td>
                       <td className="px-4 py-2.5 text-slate-600 whitespace-nowrap">
                         {row.transactionId !== null ? `#${row.transactionId}` : '—'}
+                      </td>
+                      <td className="px-4 py-2.5 text-slate-600 whitespace-nowrap">
+                        {row.transactionDateTime}
                       </td>
                       <td className="px-4 py-2.5 text-slate-600 whitespace-nowrap">
                         {row.courtName}

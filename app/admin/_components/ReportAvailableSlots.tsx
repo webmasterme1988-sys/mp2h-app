@@ -91,7 +91,7 @@ export default function ReportAvailableSlots() {
     const dayStart = new Date(`${selectedDate}T00:00:00`).toISOString();
     const dayEnd = new Date(`${selectedDate}T23:59:59`).toISOString();
 
-    const [bookingsResult, blockedResult] = await Promise.all([
+    const [bookingsResult, blockedResult, holdsResult] = await Promise.all([
       supabase
         .from('bookings')
         .select('start_time, status, created_at')
@@ -102,6 +102,12 @@ export default function ReportAvailableSlots() {
       supabase
         .from('blocked_slots')
         .select('start_time')
+        .eq('court_id', selectedCourtId)
+        .gte('start_time', dayStart)
+        .lte('start_time', dayEnd),
+      supabase
+        .from('slot_holds')
+        .select('start_time, created_at')
         .eq('court_id', selectedCourtId)
         .gte('start_time', dayStart)
         .lte('start_time', dayEnd),
@@ -116,8 +122,16 @@ export default function ReportAvailableSlots() {
     if (blockedResult.error) {
       console.error('Failed to load blocked slots:', blockedResult.error);
     }
+    if (holdsResult.error) {
+      console.error('Failed to load slot holds:', holdsResult.error);
+    }
 
-    const holdMs = settings.pending_hold_minutes * 60 * 1000;
+    // Two distinct windows: approvalHoldMs for a submitted-but-unapproved
+    // booking, checkoutHoldMs for a customer currently mid-checkout on the
+    // confirmation screen — kept separate since admins can tune them
+    // independently.
+    const approvalHoldMs = settings.pending_hold_minutes * 60 * 1000;
+    const checkoutHoldMs = settings.checkout_hold_minutes * 60 * 1000;
     const nowTime = Date.now();
     const bookedSet = new Set<number>(
       (
@@ -125,10 +139,16 @@ export default function ReportAvailableSlots() {
       )
         ?.filter((row) => {
           if (row.status !== 'pending') return true;
-          return nowTime - new Date(row.created_at).getTime() < holdMs;
+          return nowTime - new Date(row.created_at).getTime() < approvalHoldMs;
         })
         .map((row) => new Date(row.start_time).getTime()) ?? []
     );
+    // A customer currently on the confirmation screen for this slot holds
+    // it too — reflected here so this report doesn't show a slot as
+    // "available" that's mid-checkout.
+    ((holdsResult.data as { start_time: string; created_at: string }[] | null) ?? [])
+      .filter((row) => nowTime - new Date(row.created_at).getTime() < checkoutHoldMs)
+      .forEach((row) => bookedSet.add(new Date(row.start_time).getTime()));
     const blockedSet = new Set<number>(
       (blockedResult.data ?? []).map((row: { start_time: string }) =>
         new Date(row.start_time).getTime()
@@ -138,7 +158,14 @@ export default function ReportAvailableSlots() {
     setBlockedStartTimes(blockedSet);
     setLoadingSlots(false);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [selectedCourtId, selectedDate, settings.pending_hold_minutes, settings.open_days, holidays]);
+  }, [
+    selectedCourtId,
+    selectedDate,
+    settings.pending_hold_minutes,
+    settings.checkout_hold_minutes,
+    settings.open_days,
+    holidays,
+  ]);
 
   useEffect(() => {
     fetchAvailability();

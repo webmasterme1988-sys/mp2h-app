@@ -15,6 +15,8 @@ export interface CustomerEmailParams {
   totalHours: number;
   totalPrice: number | null; // null = don't show a total line at all
   footerHtml: string | null; // admin-configured, from the WYSIWYG editor
+  address: string | null;
+  directionsUrl: string | null; // from lib/googleMaps's getDirectionsUrl
 }
 
 function escapeHtml(str: string) {
@@ -61,6 +63,8 @@ export function buildCustomerConfirmationEmail(
     totalHours,
     totalPrice,
     footerHtml,
+    address,
+    directionsUrl,
   } = params;
 
   // ---------- Plain text (fallback for clients that don't render HTML) ----------
@@ -81,6 +85,9 @@ export function buildCustomerConfirmationEmail(
     `Total Hours: ${totalHours}`,
     totalPrice !== null ? '' : null,
     totalPrice !== null ? `Total: ${formatPrice(totalPrice)}` : null,
+    directionsUrl ? '' : null,
+    directionsUrl && address ? `Location: ${address}` : null,
+    directionsUrl ? `Get Directions: ${directionsUrl}` : null,
   ];
 
   const footerText = footerHtml ? htmlToPlainText(footerHtml) : '';
@@ -119,6 +126,14 @@ export function buildCustomerConfirmationEmail(
     Total Hours: ${totalHours}
   </p>
   ${totalPrice !== null ? `<p style="margin: 0 0 16px;">Total: ${formatPrice(totalPrice)}</p>` : ''}
+  ${
+    directionsUrl
+      ? `<p style="margin: 0 0 16px;">
+    ${address ? `${escapeHtml(address)}<br>` : ''}
+    <a href="${escapeHtml(directionsUrl)}" style="color: #059669;">Get Directions</a>
+  </p>`
+      : ''
+  }
   ${
     footerHtml
       ? `<hr style="border: none; border-top: 1px solid #e5e7eb; margin: 24px 0;">

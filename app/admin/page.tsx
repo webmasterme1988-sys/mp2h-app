@@ -9,6 +9,7 @@ import CourtsTab from './_components/CourtsTab';
 import BlockSlotsTab from './_components/BlockSlotsTab';
 import HoursTab from './_components/HoursTab';
 import PricingTab from './_components/PricingTab';
+import AddonsTab from './_components/AddonsTab';
 import BrandingTab from './_components/BrandingTab';
 import LandingPageTab from './_components/LandingPageTab';
 import BlacklistTab from './_components/BlacklistTab';
@@ -23,6 +24,7 @@ type TabId =
   | 'blocks'
   | 'hours'
   | 'pricing'
+  | 'addons'
   | 'branding'
   | 'landing'
   | 'blacklist'
@@ -36,6 +38,7 @@ const TABS: { id: TabId; label: string; superAdminOnly?: boolean }[] = [
   { id: 'blocks', label: 'Block Time Slots' },
   { id: 'hours', label: 'Hours & Holidays' },
   { id: 'pricing', label: 'Booking & Pricing' },
+  { id: 'addons', label: 'Add-ons' },
   { id: 'branding', label: 'Branding & Settings' },
   { id: 'landing', label: 'Landing Page' },
   { id: 'blacklist', label: 'Blacklist' },
@@ -60,12 +63,22 @@ function getGreeting() {
 // the admin freeze bug fixed earlier this session came from exactly that
 // kind of top-level re-render on every tick.
 function AdminClock() {
-  const [now, setNow] = useState(() => new Date());
+  // Seeded null (not new Date()) so the first render is identical on the
+  // server and during client hydration — this is a server-rendered Client
+  // Component, and `new Date()` evaluated at SSR time vs. at hydration
+  // time are two different instants, which would render two different
+  // formatted strings and trigger a hydration mismatch. The real value is
+  // only ever set from inside the effect below, which runs client-side
+  // after hydration completes.
+  const [now, setNow] = useState<Date | null>(null);
 
   useEffect(() => {
+    setNow(new Date());
     const interval = setInterval(() => setNow(new Date()), 30000);
     return () => clearInterval(interval);
   }, []);
+
+  if (!now) return null;
 
   const formatted = now.toLocaleString('en-US', {
     timeZone: 'Asia/Manila',
@@ -377,6 +390,7 @@ export default function AdminPage() {
             {activeTab === 'blocks' && <BlockSlotsTab />}
             {activeTab === 'hours' && <HoursTab />}
             {activeTab === 'pricing' && <PricingTab />}
+            {activeTab === 'addons' && <AddonsTab />}
             {activeTab === 'branding' && <BrandingTab />}
             {activeTab === 'landing' && <LandingPageTab />}
             {activeTab === 'blacklist' && <BlacklistTab />}

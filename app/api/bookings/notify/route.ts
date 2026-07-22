@@ -5,6 +5,7 @@ import { getMailTransporter, fetchEmailCredentials } from '@/lib/mailer';
 import { formatPrice } from '@/lib/priceTiers';
 import { fetchSiteSettings } from '@/lib/siteSettings';
 import { buildCustomerConfirmationEmail } from '@/lib/customerEmailTemplate';
+import { getDirectionsUrl } from '@/lib/googleMaps';
 
 interface NotifyBookingRow {
   id: string;
@@ -174,6 +175,8 @@ export async function POST(request: NextRequest) {
         totalHours,
         totalPrice: hasPrices ? total : null,
         footerHtml: settings.customer_email_footer_html,
+        address: settings.landing_address,
+        directionsUrl: getDirectionsUrl(settings),
       });
 
       try {

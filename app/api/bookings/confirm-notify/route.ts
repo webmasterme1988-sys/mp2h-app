@@ -6,6 +6,7 @@ import { getSupabaseAdmin } from '@/lib/supabase/admin';
 import { getMailTransporter, fetchEmailCredentials } from '@/lib/mailer';
 import { fetchSiteSettings } from '@/lib/siteSettings';
 import { buildCustomerConfirmationEmail } from '@/lib/customerEmailTemplate';
+import { getDirectionsUrl } from '@/lib/googleMaps';
 
 interface ConfirmedBookingRow {
   id: string;
@@ -138,6 +139,8 @@ export async function POST(request: NextRequest) {
     totalHours: 1,
     totalPrice: booking.price,
     footerHtml: settings.customer_email_footer_html,
+    address: settings.landing_address,
+    directionsUrl: getDirectionsUrl(settings),
   });
 
   try {

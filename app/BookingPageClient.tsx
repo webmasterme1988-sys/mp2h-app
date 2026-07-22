@@ -9,6 +9,7 @@ import { type PaymentQrCode } from '@/lib/paymentQrCodes';
 import { type Holiday } from '@/lib/holidays';
 import { compressImage } from '@/lib/compressImage';
 import { getSlotPrice, formatPrice, type PriceTier } from '@/lib/priceTiers';
+import { fetchActiveAddons, type Addon } from '@/lib/addons';
 
 // ---------- Types ----------
 
@@ -18,6 +19,15 @@ interface Court {
 }
 
 type SubmitState = 'idle' | 'uploading' | 'saving' | 'success' | 'error';
+
+// "1:05" — whole seconds only, since sub-second precision isn't
+// meaningful for a hold countdown the customer is just glancing at.
+function formatCountdown(ms: number) {
+  const totalSeconds = Math.max(0, Math.ceil(ms / 1000));
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  return `${minutes}:${String(seconds).padStart(2, '0')}`;
+}
 
 interface BookingPageClientProps {
   initialSettings: SiteSettings;
@@ -55,6 +65,8 @@ export default function BookingPageClient({
   // before opening the modal.
   const [selectedSlots, setSelectedSlots] = useState<TimeSlot[]>([]);
   const [modalOpen, setModalOpen] = useState(false);
+  // Step 1: slots + add-ons. Step 2: total/line items + contact info + payment.
+  const [modalStep, setModalStep] = useState<1 | 2>(1);
 
   const [playerName, setPlayerName] = useState('');
   const [playerPhone, setPlayerPhone] = useState('');
@@ -68,14 +80,176 @@ export default function BookingPageClient({
   const [lastTransactionId, setLastTransactionId] = useState<number | null>(null);
   const [lastBookingStatus, setLastBookingStatus] = useState<'pending' | 'confirmed'>('pending');
 
-  // Ticks forward every 30s so today's already-passed slots gray out live,
-  // without needing the user to touch the date/court pickers to re-render.
-  const [now, setNow] = useState<number>(() => Date.now());
+  // ---------- Add-ons ----------
+  const [addons, setAddons] = useState<Addon[]>([]);
+  const [addonQuantities, setAddonQuantities] = useState<Record<number, number>>({});
 
   useEffect(() => {
-    const interval = setInterval(() => setNow(Date.now()), 30000);
-    return () => clearInterval(interval);
+    fetchActiveAddons(supabase).then(setAddons);
   }, []);
+
+  const addonsTotal = useMemo(
+    () =>
+      Object.entries(addonQuantities).reduce((sum, [id, qty]) => {
+        const addon = addons.find((a) => a.id === Number(id));
+        return sum + (addon ? addon.price * qty : 0);
+      }, 0),
+    [addonQuantities, addons]
+  );
+
+  // ---------- Slot holds ----------
+  // Reserves the selected slot(s) the moment the customer opens the
+  // confirmation modal (not just once they finish submitting) — otherwise
+  // two customers could both be filling out the form for the same slot at
+  // once, and the DB re-check at final submit would only catch it for
+  // whoever loses that race, not warn the second customer up front.
+  const [holdIds, setHoldIds] = useState<number[]>([]);
+  const [holdCreatedAt, setHoldCreatedAt] = useState<number | null>(null);
+  // Gated on holdCreatedAt !== null everywhere it's used, so — unlike
+  // `now` above — this never actually renders before a hold exists (i.e.
+  // never during the initial SSR/hydration pass), and 0 vs. a real
+  // timestamp makes no visible difference. Still seeded to 0 rather than
+  // Date.now() for the same reason, as cheap insurance.
+  const [holdNow, setHoldNow] = useState<number>(0);
+
+  // Two distinct hold windows: checkoutHoldMs is how long a slot stays
+  // reserved once a customer opens the confirmation screen (this is what
+  // holdMsRemaining/holdExpired below track); approvalHoldMs is the
+  // separate, pre-existing "pending booking awaiting admin approval"
+  // window, used only when checking real bookings for conflicts.
+  const checkoutHoldMs = settings.checkout_hold_minutes * 60 * 1000;
+  const approvalHoldMs = settings.pending_hold_minutes * 60 * 1000;
+  const holdMsRemaining =
+    holdCreatedAt !== null ? Math.max(0, holdCreatedAt + checkoutHoldMs - holdNow) : 0;
+  const holdExpired = holdCreatedAt !== null && holdMsRemaining <= 0;
+
+  // Only ticks while the modal actually has an active hold to count down.
+  useEffect(() => {
+    if (!modalOpen || holdCreatedAt === null) return;
+    const interval = setInterval(() => setHoldNow(Date.now()), 1000);
+    return () => clearInterval(interval);
+  }, [modalOpen, holdCreatedAt]);
+
+  // Releases the hold rows as soon as the countdown hits zero, unless a
+  // submit is actively in flight — that in-flight request gets to finish
+  // and rely on its own server-side re-check instead of being yanked out
+  // from under it by the client-side timer at the exact same moment.
+  useEffect(() => {
+    if (!modalOpen || holdCreatedAt === null) return;
+    if (submitState === 'uploading' || submitState === 'saving' || submitState === 'success') return;
+    if (holdMsRemaining > 0) return;
+    if (holdIds.length === 0) return;
+
+    const ids = holdIds;
+    setHoldIds([]);
+    supabase
+      .from('slot_holds')
+      .delete()
+      .in('id', ids)
+      .then(({ error }) => {
+        if (error) console.error('Failed to release expired hold:', error);
+      });
+  }, [holdMsRemaining, modalOpen, holdCreatedAt, submitState, holdIds]);
+
+  // Re-checks the exact same conditions fetchBookedSlots uses, right before
+  // creating a hold or finalizing a submission — the grid the customer
+  // clicked from is only as fresh as the last availability-refresh tick
+  // (admin-configurable), so this is the actual guarantee against double
+  // booking, not just the grid's greyed-out state.
+  // `includeActiveHolds` is only true for the pre-hold-creation check (when
+  // the customer clicks a slot/"Book Selected Slots") — at that point we
+  // don't yet hold anything ourselves, so another customer's active hold on
+  // the same slot is a real conflict. It's left false for the final
+  // pre-submit check, since by then the hold row being checked against
+  // would just be our own (we already reserved it when the modal opened),
+  // which isn't a conflict with ourselves.
+  const hasConflict = useCallback(
+    async (courtId: string, date: string, slots: TimeSlot[], includeActiveHolds = false) => {
+      const dayStart = new Date(`${date}T00:00:00`).toISOString();
+      const dayEnd = new Date(`${date}T23:59:59`).toISOString();
+
+      const [bookingsResult, blockedResult, holdsResult] = await Promise.all([
+        supabase
+          .from('bookings')
+          .select('start_time, status, created_at')
+          .eq('court_id', courtId)
+          .gte('start_time', dayStart)
+          .lte('start_time', dayEnd)
+          .in('status', ['pending', 'confirmed']),
+        supabase
+          .from('blocked_slots')
+          .select('start_time')
+          .eq('court_id', courtId)
+          .gte('start_time', dayStart)
+          .lte('start_time', dayEnd),
+        includeActiveHolds
+          ? supabase
+              .from('slot_holds')
+              .select('start_time, created_at')
+              .eq('court_id', courtId)
+              .gte('start_time', dayStart)
+              .lte('start_time', dayEnd)
+          : Promise.resolve({ data: null, error: null }),
+      ]);
+
+      const nowTime = Date.now();
+      const takenTimes = new Set<number>(
+        (
+          (bookingsResult.data as { start_time: string; status: string; created_at: string }[]) ?? []
+        )
+          .filter((row) => {
+            if (row.status !== 'pending') return true;
+            return nowTime - new Date(row.created_at).getTime() < approvalHoldMs;
+          })
+          .map((row) => new Date(row.start_time).getTime())
+      );
+      ((blockedResult.data as { start_time: string }[]) ?? []).forEach((row) =>
+        takenTimes.add(new Date(row.start_time).getTime())
+      );
+      if (includeActiveHolds) {
+        ((holdsResult.data as { start_time: string; created_at: string }[] | null) ?? [])
+          .filter((row) => nowTime - new Date(row.created_at).getTime() < checkoutHoldMs)
+          .forEach((row) => takenTimes.add(new Date(row.start_time).getTime()));
+      }
+
+      return slots.some((slot) => takenTimes.has(new Date(slot.startISO(date)).getTime()));
+    },
+    [approvalHoldMs, checkoutHoldMs]
+  );
+
+  async function releaseHold() {
+    if (holdIds.length === 0) return;
+    const ids = holdIds;
+    setHoldIds([]);
+    setHoldCreatedAt(null);
+    const { error } = await supabase.from('slot_holds').delete().in('id', ids);
+    if (error) console.error('Failed to release hold:', error);
+  }
+
+  // Ticks forward on the admin-configured interval (Admin > Hours &
+  // Holidays > Availability Refresh Time) so today's already-passed slots
+  // gray out live, and fetchBookedSlots below re-polls the database on the
+  // same cadence — without needing the user to touch the date/court
+  // pickers to re-render.
+  //
+  // Seeded to 0 (not Date.now()) rather than the real time: this is a
+  // server-rendered Client Component, and Date.now() evaluated during SSR
+  // vs. during the client's initial hydration render are two different
+  // instants — any slot that happened to cross the "past" boundary between
+  // those two moments would render differently on each side and trigger a
+  // hydration mismatch. Seeding to 0 makes the first render identical
+  // (nothing is past yet) on both sides; the real value is set from inside
+  // the effect below, which only ever runs client-side after hydration.
+  const [now, setNow] = useState<number>(0);
+
+  useEffect(() => {
+    setNow(Date.now());
+    const interval = setInterval(
+      () => setNow(Date.now()),
+      settings.availability_refresh_seconds * 1000
+    );
+    return () => clearInterval(interval);
+  }, [settings.availability_refresh_seconds]);
 
   const timeSlots = useMemo(
     () => buildTimeSlots(settings.opening_hour, settings.closing_hour),
@@ -88,8 +262,8 @@ export default function BookingPageClient({
   );
 
   const totalPrice = useMemo(
-    () => selectedSlots.reduce((sum, slot) => sum + getPrice(slot.hour), 0),
-    [selectedSlots, getPrice]
+    () => selectedSlots.reduce((sum, slot) => sum + getPrice(slot.hour), 0) + addonsTotal,
+    [selectedSlots, getPrice, addonsTotal]
   );
 
   const holidayDates = useMemo(() => new Set(holidays.map((h) => h.holiday_date)), [holidays]);
@@ -147,7 +321,7 @@ export default function BookingPageClient({
     const dayStart = new Date(`${selectedDate}T00:00:00`).toISOString();
     const dayEnd = new Date(`${selectedDate}T23:59:59`).toISOString();
 
-    const [bookingsResult, blockedResult] = await Promise.all([
+    const [bookingsResult, blockedResult, holdsResult] = await Promise.all([
       supabase
         .from('bookings')
         .select('start_time, status, created_at')
@@ -161,6 +335,12 @@ export default function BookingPageClient({
         .eq('court_id', selectedCourtId)
         .gte('start_time', dayStart)
         .lte('start_time', dayEnd),
+      supabase
+        .from('slot_holds')
+        .select('start_time, created_at')
+        .eq('court_id', selectedCourtId)
+        .gte('start_time', dayStart)
+        .lte('start_time', dayEnd),
     ]);
 
     if (bookingsResult.error) {
@@ -170,17 +350,21 @@ export default function BookingPageClient({
       return;
     }
 
-    // Blocked slots are a secondary concern — if that table isn't set up
-    // yet (or the query fails for any reason), fall back to "nothing
-    // blocked" instead of breaking the whole booking page.
+    // Blocked slots and active holds are secondary concerns — if either
+    // table isn't set up yet (or the query fails for any reason), fall back
+    // to "nothing blocked/held" instead of breaking the whole booking page.
     if (blockedResult.error) {
       console.error('Failed to load blocked slots:', blockedResult.error);
+    }
+    if (holdsResult.error) {
+      console.error('Failed to load slot holds:', holdsResult.error);
     }
 
     // A 'pending' booking only holds the slot for pending_hold_minutes from
     // when it was submitted — past that, if the admin hasn't approved it,
     // the slot opens back up. 'confirmed' bookings always hold the slot.
-    const holdMs = settings.pending_hold_minutes * 60 * 1000;
+    // Active slot_holds (another customer currently on the confirmation
+    // screen for this slot) use the separate checkout_hold_minutes window.
     const nowTime = Date.now();
     const bookedSet = new Set<number>(
       (
@@ -188,10 +372,13 @@ export default function BookingPageClient({
       )
         ?.filter((row) => {
           if (row.status !== 'pending') return true;
-          return nowTime - new Date(row.created_at).getTime() < holdMs;
+          return nowTime - new Date(row.created_at).getTime() < approvalHoldMs;
         })
         .map((row) => new Date(row.start_time).getTime()) ?? []
     );
+    ((holdsResult.data as { start_time: string; created_at: string }[] | null) ?? [])
+      .filter((row) => nowTime - new Date(row.created_at).getTime() < checkoutHoldMs)
+      .forEach((row) => bookedSet.add(new Date(row.start_time).getTime()));
     const blockedSet = new Set<number>(
       (blockedResult.data ?? []).map((row: { start_time: string }) =>
         new Date(row.start_time).getTime()
@@ -200,13 +387,14 @@ export default function BookingPageClient({
     setBookedStartTimes(bookedSet);
     setBlockedStartTimes(blockedSet);
     setLoadingSlots(false);
-  }, [selectedCourtId, selectedDate, isDateClosed, settings.pending_hold_minutes]);
+  }, [selectedCourtId, selectedDate, isDateClosed, approvalHoldMs, checkoutHoldMs]);
 
   useEffect(() => {
     fetchBookedSlots();
-    // Re-runs on every `now` tick too (every 30s) so a slot whose pending
-    // hold just expired frees up live, without the customer having to
-    // touch the court/date pickers to trigger a re-fetch.
+    // Re-runs on every `now` tick too (on the admin-configured refresh
+    // interval) so a slot whose pending hold just expired frees up live,
+    // without the customer having to touch the court/date pickers to
+    // trigger a re-fetch.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [fetchBookedSlots, now]);
 
@@ -230,8 +418,45 @@ export default function BookingPageClient({
     return selectedSlots.some((s) => s.hour === slot.hour);
   }
 
-  function openModalWithSlots(slots: TimeSlot[]) {
+  const [openingModal, setOpeningModal] = useState(false);
+
+  async function openModalWithSlots(slots: TimeSlot[]) {
+    if (!selectedCourtId || openingModal) return;
+
+    setOpeningModal(true);
+    setSlotsError(null);
+
+    // The grid is only as fresh as the last refresh tick — re-check right
+    // before reserving, so a slot someone else just took doesn't get a
+    // hold placed on top of their real booking.
+    const conflict = await hasConflict(selectedCourtId, selectedDate, slots, true);
+    if (conflict) {
+      setSlotsError('Sorry, one of those slots was just taken. Please pick another.');
+      setSelectedSlots([]);
+      setOpeningModal(false);
+      await fetchBookedSlots();
+      return;
+    }
+
+    const { data: holdRows, error: holdError } = await supabase
+      .from('slot_holds')
+      .insert(slots.map((slot) => ({ court_id: selectedCourtId, start_time: slot.startISO(selectedDate) })))
+      .select('id');
+
+    if (holdError) {
+      console.error('Failed to reserve slot(s):', holdError);
+      setSlotsError('Could not reserve that slot right now. Please try again.');
+      setOpeningModal(false);
+      return;
+    }
+
+    const reservedAt = new Date().getTime();
+    setHoldIds((holdRows ?? []).map((r) => r.id));
+    setHoldCreatedAt(reservedAt);
+    setHoldNow(reservedAt);
+
     setSelectedSlots(slots);
+    setAddonQuantities({});
     setPlayerName('');
     setPlayerPhone('');
     setPlayerEmail('');
@@ -240,7 +465,9 @@ export default function BookingPageClient({
     setSubmitState('idle');
     setSubmitError(null);
     setSelectedQrIndex(0);
+    setModalStep(1);
     setModalOpen(true);
+    setOpeningModal(false);
   }
 
   function handleSlotClick(slot: TimeSlot) {
@@ -269,8 +496,12 @@ export default function BookingPageClient({
 
   function closeModal() {
     if (submitState === 'uploading' || submitState === 'saving') return;
+    // Frees the slot(s) immediately instead of making other customers wait
+    // out the full hold window just because this one backed out early.
+    if (submitState !== 'success') releaseHold();
     setModalOpen(false);
     setSelectedSlots([]);
+    setAddonQuantities({});
   }
 
   async function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
@@ -346,7 +577,21 @@ export default function BookingPageClient({
     setSubmitError(null);
 
     try {
-      // 1. Check the blacklist before doing anything expensive (receipt
+      // 1. Re-verify the slot(s) are still actually free right before
+      // committing — the hold row only makes the *grid* show them as taken
+      // to other browsers; this check against the real bookings/blocked
+      // tables is what actually prevents a last-second double booking (e.g.
+      // an admin manually confirming a conflicting booking in the meantime).
+      const stillConflict = await hasConflict(selectedCourtId, selectedDate, selectedSlots);
+      if (stillConflict) {
+        await releaseHold();
+        setSubmitState('error');
+        setSubmitError('Sorry, this time slot is no longer available. Please select another.');
+        await fetchBookedSlots();
+        return;
+      }
+
+      // 2. Check the blacklist before doing anything expensive (receipt
       // upload, transaction row). This is just a fast-fail for UX — the
       // database also enforces it on insert via a trigger, since a
       // determined client could skip this check entirely.
@@ -363,7 +608,7 @@ export default function BookingPageClient({
         );
       }
 
-      // 2. Upload receipt to Supabase Storage — one receipt covers every
+      // 3. Upload receipt to Supabase Storage — one receipt covers every
       // slot in this submission, since it's a single payment for all of them.
       setSubmitState('uploading');
 
@@ -385,7 +630,7 @@ export default function BookingPageClient({
       const { data: publicUrlData } = supabase.storage.from('receipts').getPublicUrl(filePath);
       const receiptUrl = publicUrlData.publicUrl;
 
-      // 3. Create a transaction to group these slots under (a "receipt" of
+      // 4. Create a transaction to group these slots under (a "receipt" of
       // this submission, so the admin dashboard can show one row per
       // booking attempt instead of one per hour).
       setSubmitState('saving');
@@ -400,7 +645,7 @@ export default function BookingPageClient({
         throw new Error(`Booking could not be saved: ${transactionError.message}`);
       }
 
-      // 4. Insert one booking row per selected slot, all sharing that
+      // 5. Insert one booking row per selected slot, all sharing that
       // transaction id. Auto-confirm skips the pending/approval step
       // entirely, so the hold-time window never comes into play for these.
       const bookingStatus: 'pending' | 'confirmed' = settings.auto_confirm_bookings
@@ -429,9 +674,36 @@ export default function BookingPageClient({
         throw new Error(`Booking could not be saved: ${insertError.message}`);
       }
 
+      // 6. Record any selected add-ons against this transaction. Snapshots
+      // the name/price at booking time so a later admin price change
+      // doesn't retroactively alter what this customer was actually charged.
+      const selectedAddonEntries = Object.entries(addonQuantities).filter(([, qty]) => qty > 0);
+      if (selectedAddonEntries.length > 0) {
+        const addonRows = selectedAddonEntries.map(([addonId, quantity]) => {
+          const addon = addons.find((a) => a.id === Number(addonId));
+          return {
+            transaction_id: transaction.id,
+            addon_id: addon?.id ?? null,
+            name_snapshot: addon?.name ?? 'Add-on',
+            price_snapshot: addon?.price ?? 0,
+            quantity,
+          };
+        });
+
+        const { error: addonInsertError } = await supabase.from('booking_addons').insert(addonRows);
+        if (addonInsertError) {
+          // Best-effort — the core booking already succeeded, so don't fail
+          // the whole submission just because the add-on line items didn't save.
+          console.error('Failed to save add-ons for this booking:', addonInsertError);
+        }
+      }
+
       setLastTransactionId(transaction.id);
       setLastBookingStatus(bookingStatus);
       setSubmitState('success');
+      // Superseded by the real booking rows above — release rather than
+      // wait out the rest of the hold window.
+      await releaseHold();
       await fetchBookedSlots();
 
       // Best-effort admin email alert — the booking itself already
@@ -558,7 +830,7 @@ export default function BookingPageClient({
                 return (
                   <button
                     key={slot.hour}
-                    disabled={booked || blocked || past}
+                    disabled={booked || blocked || past || openingModal}
                     onClick={() => handleSlotClick(slot)}
                     style={selected ? { backgroundColor: settings.selection_color, borderColor: settings.selection_color } : undefined}
                     className={`rounded-xl border px-3 py-3 text-sm font-medium text-center transition-colors ${
@@ -586,11 +858,15 @@ export default function BookingPageClient({
           {settings.allow_multi_slot_booking && selectedSlots.length > 0 && (
             <button
               onClick={handleBookSelectedSlots}
+              disabled={openingModal}
               style={{ backgroundColor: settings.button_bg_color, color: settings.button_label_color }}
-              className="w-full mt-4 rounded-xl font-medium py-3 text-sm hover:brightness-90 transition-[filter]"
+              className="w-full mt-4 rounded-xl font-medium py-3 text-sm hover:brightness-90 disabled:opacity-60 disabled:cursor-not-allowed transition-[filter]"
             >
-              Book {selectedSlots.length} Selected Slot{selectedSlots.length > 1 ? 's' : ''}
-              {settings.show_price ? ` — ${formatPrice(totalPrice)}` : ''}
+              {openingModal
+                ? 'Checking availability…'
+                : `Book ${selectedSlots.length} Selected Slot${selectedSlots.length > 1 ? 's' : ''}${
+                    settings.show_price ? ` — ${formatPrice(totalPrice)}` : ''
+                  }`}
             </button>
           )}
 
@@ -633,6 +909,24 @@ export default function BookingPageClient({
                 ×
               </button>
             </div>
+
+            {/* Hold warning + countdown — shown right below the court/time
+                slot summary above, and stays visible across both steps. */}
+            {holdCreatedAt !== null && submitState !== 'success' && !holdExpired && (
+              <div className="px-5 pt-4">
+                <div className="rounded-xl bg-red-50 border border-red-200 px-4 py-3">
+                  {settings.booking_hold_warning_text && (
+                    <p className="text-sm text-red-700 font-medium">
+                      {settings.booking_hold_warning_text}
+                    </p>
+                  )}
+                  <p className="text-xs text-red-600 mt-1">
+                    Time remaining to complete this booking:{' '}
+                    <span className="font-semibold">{formatCountdown(holdMsRemaining)}</span>
+                  </p>
+                </div>
+              </div>
+            )}
 
             <div className="px-5 py-4 space-y-4">
               {submitState === 'success' ? (
@@ -689,6 +983,12 @@ export default function BookingPageClient({
                       <span>Total Hours</span>
                       <span className="font-medium text-slate-700">{selectedSlots.length}</span>
                     </div>
+                    {addonsTotal > 0 && (
+                      <div className="flex justify-between text-slate-500">
+                        <span>Add-ons</span>
+                        <span>{formatPrice(addonsTotal)}</span>
+                      </div>
+                    )}
                     {settings.show_price && (
                       <div className="flex justify-between font-semibold text-slate-800">
                         <span>Total Paid</span>
@@ -701,6 +1001,7 @@ export default function BookingPageClient({
                     onClick={() => {
                       setModalOpen(false);
                       setSelectedSlots([]);
+                      setAddonQuantities({});
                       setSubmitState('idle');
                     }}
                     style={{ backgroundColor: settings.button_bg_color, color: settings.button_label_color }}
@@ -709,43 +1010,150 @@ export default function BookingPageClient({
                     Done
                   </button>
                 </div>
-              ) : (
+              ) : holdExpired ? (
+                <div className="text-center py-8">
+                  <div className="w-14 h-14 rounded-full bg-red-100 text-red-600 flex items-center justify-center mx-auto mb-3 text-2xl">
+                    !
+                  </div>
+                  <p className="font-medium text-slate-800">Your reserved time has expired</p>
+                  <p className="text-sm text-slate-500 mt-1">
+                    Someone else may now book this slot. Please select your slot(s) again to
+                    continue.
+                  </p>
+                  <button
+                    onClick={closeModal}
+                    style={{ backgroundColor: settings.button_bg_color, color: settings.button_label_color }}
+                    className="w-full mt-6 rounded-xl font-medium py-3 text-sm hover:brightness-90 transition-[filter]"
+                  >
+                    Start Over
+                  </button>
+                </div>
+              ) : modalStep === 1 ? (
                 <>
-                  {(selectedSlots.length > 1 || settings.show_price) && (
-                    <div className="rounded-xl border border-slate-200 p-3">
-                      {selectedSlots.length > 1 ? (
-                        <div className="space-y-1">
-                          {selectedSlots.map((slot) => (
-                            <div key={slot.hour} className="flex justify-between text-sm text-slate-600">
-                              <span>{slot.label}</span>
-                              {settings.show_price && <span>{formatPrice(getPrice(slot.hour))}</span>}
-                            </div>
-                          ))}
+                  {/* Step 1: slot(s) booked + add-ons */}
+                  <div className="rounded-xl border border-slate-200 p-3">
+                    <div className="space-y-1">
+                      {selectedSlots.map((slot) => (
+                        <div key={slot.hour} className="flex justify-between text-sm text-slate-600">
+                          <span>{slot.label}</span>
+                          {settings.show_price && <span>{formatPrice(getPrice(slot.hour))}</span>}
                         </div>
-                      ) : (
-                        settings.show_price && (
-                          <div className="flex justify-between text-sm text-slate-600">
-                            <span>{selectedSlots[0].label}</span>
-                            <span>{formatPrice(getPrice(selectedSlots[0].hour))}</span>
-                          </div>
-                        )
-                      )}
-                      <div className="mt-2 pt-2 border-t border-slate-200 space-y-1">
-                        {selectedSlots.length > 1 && (
-                          <div className="flex justify-between text-sm text-slate-600">
-                            <span>Total Hours</span>
-                            <span className="font-medium text-slate-700">{selectedSlots.length}</span>
-                          </div>
-                        )}
-                        {settings.show_price && (
-                          <div className="flex justify-between text-sm font-semibold text-slate-800">
-                            <span>Total</span>
-                            <span>{formatPrice(totalPrice)}</span>
-                          </div>
-                        )}
+                      ))}
+                    </div>
+                    {selectedSlots.length > 1 && (
+                      <div className="flex justify-between text-sm text-slate-600 mt-2 pt-2 border-t border-slate-200">
+                        <span>Total Hours</span>
+                        <span className="font-medium text-slate-700">{selectedSlots.length}</span>
                       </div>
+                    )}
+                  </div>
+
+                  {/* Add-ons */}
+                  {addons.length > 0 && (
+                    <div className="rounded-xl border border-slate-200 p-3">
+                      <p className="text-sm font-medium text-slate-700 mb-2">Add-ons (optional)</p>
+                      <div className="space-y-2.5">
+                        {addons.map((addon) => {
+                          const qty = addonQuantities[addon.id] ?? 0;
+                          return (
+                            <div key={addon.id} className="flex items-center justify-between gap-3">
+                              <div>
+                                <p className="text-sm text-slate-700">{addon.name}</p>
+                                <p className="text-xs text-slate-400">{formatPrice(addon.price)} each</p>
+                              </div>
+                              <div className="flex items-center gap-2">
+                                <button
+                                  type="button"
+                                  onClick={() =>
+                                    setAddonQuantities((prev) => ({
+                                      ...prev,
+                                      [addon.id]: Math.max(0, (prev[addon.id] ?? 0) - 1),
+                                    }))
+                                  }
+                                  disabled={qty === 0}
+                                  className="w-7 h-7 rounded-lg border border-slate-300 text-slate-600 hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed"
+                                >
+                                  −
+                                </button>
+                                <span className="w-6 text-center text-sm font-medium text-slate-700">
+                                  {qty}
+                                </span>
+                                <button
+                                  type="button"
+                                  onClick={() =>
+                                    setAddonQuantities((prev) => ({
+                                      ...prev,
+                                      [addon.id]: Math.min(addon.max_quantity, (prev[addon.id] ?? 0) + 1),
+                                    }))
+                                  }
+                                  disabled={qty >= addon.max_quantity}
+                                  className="w-7 h-7 rounded-lg border border-slate-300 text-slate-600 hover:bg-slate-50 disabled:opacity-40 disabled:cursor-not-allowed"
+                                >
+                                  +
+                                </button>
+                              </div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                      {addonsTotal > 0 && (
+                        <div className="flex justify-between text-sm font-medium text-slate-700 mt-2.5 pt-2.5 border-t border-slate-200">
+                          <span>Add-ons total</span>
+                          <span>{formatPrice(addonsTotal)}</span>
+                        </div>
+                      )}
                     </div>
                   )}
+
+                  <button
+                    type="button"
+                    onClick={() => setModalStep(2)}
+                    style={{ backgroundColor: settings.button_bg_color, color: settings.button_label_color }}
+                    className="w-full rounded-xl font-medium py-3 text-sm hover:brightness-90 transition-[filter]"
+                  >
+                    Next
+                  </button>
+                </>
+              ) : (
+                <>
+                  {/* Step 2: grand total/line items + contact info + payment */}
+                  <div className="rounded-xl border border-slate-200 p-3">
+                    <p className="text-sm font-medium text-slate-700 mb-2">Order Summary</p>
+                    <div className="space-y-1">
+                      {selectedSlots.map((slot) => (
+                        <div key={slot.hour} className="flex justify-between text-sm text-slate-600">
+                          <span>{slot.label}</span>
+                          {settings.show_price && <span>{formatPrice(getPrice(slot.hour))}</span>}
+                        </div>
+                      ))}
+                      {Object.entries(addonQuantities)
+                        .filter(([, qty]) => qty > 0)
+                        .map(([addonId, qty]) => {
+                          const addon = addons.find((a) => a.id === Number(addonId));
+                          if (!addon) return null;
+                          return (
+                            <div key={addonId} className="flex justify-between text-sm text-slate-600">
+                              <span>
+                                {addon.name} × {qty}
+                              </span>
+                              <span>{formatPrice(addon.price * qty)}</span>
+                            </div>
+                          );
+                        })}
+                    </div>
+                    <div className="mt-2 pt-2 border-t border-slate-200 space-y-1">
+                      <div className="flex justify-between text-sm text-slate-600">
+                        <span>Total Hours</span>
+                        <span className="font-medium text-slate-700">{selectedSlots.length}</span>
+                      </div>
+                      {(settings.show_price || addonsTotal > 0) && (
+                        <div className="flex justify-between text-sm font-semibold text-slate-800">
+                          <span>Grand Total</span>
+                          <span>{formatPrice(totalPrice)}</span>
+                        </div>
+                      )}
+                    </div>
+                  </div>
 
                   {/* Name / Phone */}
                   <div>
@@ -881,18 +1289,28 @@ export default function BookingPageClient({
 
                   {submitError && <p className="text-sm text-red-600">{submitError}</p>}
 
-                  <button
-                    onClick={handleSubmitBooking}
-                    disabled={submitState === 'uploading' || submitState === 'saving' || compressingReceipt}
-                    style={{ backgroundColor: settings.button_bg_color, color: settings.button_label_color }}
-                    className="w-full rounded-xl font-medium py-3 text-sm hover:brightness-90 disabled:opacity-60 disabled:cursor-not-allowed transition-[filter]"
-                  >
-                    {submitState === 'uploading'
-                      ? 'Uploading receipt…'
-                      : submitState === 'saving'
-                      ? 'Saving booking…'
-                      : settings.submit_button_label}
-                  </button>
+                  <div className="flex gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setModalStep(1)}
+                      disabled={submitState === 'uploading' || submitState === 'saving'}
+                      className="rounded-xl border border-slate-300 text-slate-600 font-medium py-3 px-4 text-sm hover:bg-slate-50 disabled:opacity-60 disabled:cursor-not-allowed transition-colors"
+                    >
+                      Back
+                    </button>
+                    <button
+                      onClick={handleSubmitBooking}
+                      disabled={submitState === 'uploading' || submitState === 'saving' || compressingReceipt}
+                      style={{ backgroundColor: settings.button_bg_color, color: settings.button_label_color }}
+                      className="flex-1 rounded-xl font-medium py-3 text-sm hover:brightness-90 disabled:opacity-60 disabled:cursor-not-allowed transition-[filter]"
+                    >
+                      {submitState === 'uploading'
+                        ? 'Uploading receipt…'
+                        : submitState === 'saving'
+                        ? 'Saving booking…'
+                        : settings.submit_button_label}
+                    </button>
+                  </div>
                 </>
               )}
             </div>

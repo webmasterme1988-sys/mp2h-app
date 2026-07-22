@@ -3,6 +3,7 @@ import { createPublicServerClient } from '@/lib/supabase/publicServerClient';
 import { fetchSiteSettings } from '@/lib/siteSettings';
 import { fetchLandingPhotos } from '@/lib/landingPhotos';
 import { formatHourLabel } from '@/lib/timeSlots';
+import { getDirectionsUrl } from '@/lib/googleMaps';
 import GalleryLightbox from '@/components/GalleryLightbox';
 import {
   FacebookIcon,
@@ -60,11 +61,7 @@ export default async function LandingPage() {
   const mapsEmbedUrl = settings.landing_address
     ? `https://www.google.com/maps?q=${encodeURIComponent(settings.landing_address)}&output=embed`
     : null;
-  const directionsUrl = settings.landing_google_maps_url
-    ? settings.landing_google_maps_url
-    : settings.landing_address
-      ? `https://www.google.com/maps/dir/?api=1&destination=${encodeURIComponent(settings.landing_address)}`
-      : null;
+  const directionsUrl = getDirectionsUrl(settings);
   const showFbChat = settings.landing_enable_fb_chat && settings.landing_facebook_page_id;
 
   return (

@@ -46,6 +46,15 @@ export default function HoursTab() {
   const [pendingHoldMinutes, setPendingHoldMinutes] = useState(
     DEFAULT_SITE_SETTINGS.pending_hold_minutes
   );
+  const [checkoutHoldMinutes, setCheckoutHoldMinutes] = useState(
+    DEFAULT_SITE_SETTINGS.checkout_hold_minutes
+  );
+  const [availabilityRefreshSeconds, setAvailabilityRefreshSeconds] = useState(
+    DEFAULT_SITE_SETTINGS.availability_refresh_seconds
+  );
+  const [holdWarningText, setHoldWarningText] = useState(
+    DEFAULT_SITE_SETTINGS.booking_hold_warning_text ?? ''
+  );
   const [autoConfirmBookings, setAutoConfirmBookings] = useState(
     DEFAULT_SITE_SETTINGS.auto_confirm_bookings
   );
@@ -69,6 +78,9 @@ export default function HoursTab() {
       setClosingHour(loaded.closing_hour);
       setOpenDays(loaded.open_days);
       setPendingHoldMinutes(loaded.pending_hold_minutes);
+      setCheckoutHoldMinutes(loaded.checkout_hold_minutes);
+      setAvailabilityRefreshSeconds(loaded.availability_refresh_seconds);
+      setHoldWarningText(loaded.booking_hold_warning_text ?? '');
       setAutoConfirmBookings(loaded.auto_confirm_bookings);
       setLoading(false);
     });
@@ -109,6 +121,14 @@ export default function HoursTab() {
       setError('Booking hold time must be at least 1 minute.');
       return;
     }
+    if (checkoutHoldMinutes <= 0) {
+      setError('Checkout hold time must be at least 1 minute.');
+      return;
+    }
+    if (availabilityRefreshSeconds <= 0) {
+      setError('Availability refresh time must be at least 1 second.');
+      return;
+    }
 
     setSaving(true);
 
@@ -123,6 +143,9 @@ export default function HoursTab() {
       closing_hour: closingHour,
       open_days: openDays,
       pending_hold_minutes: pendingHoldMinutes,
+      checkout_hold_minutes: checkoutHoldMinutes,
+      availability_refresh_seconds: availabilityRefreshSeconds,
+      booking_hold_warning_text: holdWarningText.trim() || null,
       auto_confirm_bookings: autoConfirmBookings,
     });
 
@@ -280,14 +303,65 @@ export default function HoursTab() {
               </label>
             </div>
 
+            <div>
+              <label className="block text-sm font-medium text-slate-600 mb-1">
+                Checkout Hold Time (minutes)
+              </label>
+              <p className="text-xs text-slate-500 mb-2">
+                As soon as a customer opens the confirmation screen for a slot, it&apos;s
+                reserved for this many minutes so no one else can grab it while they finish
+                checking out. Released immediately if they close the window early, or once
+                they submit. Applies regardless of the auto-confirm setting below.
+              </p>
+              <input
+                type="number"
+                min={1}
+                value={checkoutHoldMinutes}
+                onChange={(e) => setCheckoutHoldMinutes(Number(e.target.value))}
+                className="w-32 rounded-xl border border-slate-300 px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
+              />
+
+              <label className="block text-sm font-medium text-slate-600 mb-1 mt-4">
+                Availability Refresh Time (seconds)
+              </label>
+              <p className="text-xs text-slate-500 mb-2">
+                How often the booking page re-checks the database while a customer has it
+                open, so slots taken by someone else grey out live. Lower is more up-to-date
+                but makes more requests.
+              </p>
+              <input
+                type="number"
+                min={1}
+                value={availabilityRefreshSeconds}
+                onChange={(e) => setAvailabilityRefreshSeconds(Number(e.target.value))}
+                className="w-32 rounded-xl border border-slate-300 px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
+              />
+
+              <label className="block text-sm font-medium text-slate-600 mb-1 mt-4">
+                Hold Warning Message
+              </label>
+              <p className="text-xs text-slate-500 mb-2">
+                Shown in red on the booking confirmation screen, next to the checkout
+                countdown above. Leave blank to hide it.
+              </p>
+              <input
+                type="text"
+                value={holdWarningText}
+                onChange={(e) => setHoldWarningText(e.target.value)}
+                placeholder="This time slot is reserved for 15 minutes only."
+                className="w-full rounded-xl border border-slate-300 px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
+              />
+            </div>
+
             <div className={autoConfirmBookings ? 'opacity-50' : undefined}>
               <label className="block text-sm font-medium text-slate-600 mb-1">
                 Booking Hold Time (minutes)
               </label>
               <p className="text-xs text-slate-500 mb-2">
-                A new booking holds its time slot as &quot;pending&quot; for this many minutes.
-                If it isn&apos;t approved before then, the slot opens back up for other
-                customers.
+                Separate from the checkout hold above: once a booking is submitted, it holds
+                its time slot as &quot;pending&quot; for this many minutes while it waits for
+                admin approval. If it isn&apos;t approved before then, the slot opens back up
+                for other customers.
               </p>
               <input
                 type="number"

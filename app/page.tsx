@@ -2,6 +2,7 @@ import Script from 'next/script';
 import { createPublicServerClient } from '@/lib/supabase/publicServerClient';
 import { fetchSiteSettings } from '@/lib/siteSettings';
 import { fetchLandingPhotos } from '@/lib/landingPhotos';
+import { formatHourLabel } from '@/lib/timeSlots';
 
 // Content here (about/policy text, photos, contact info) is admin-editable
 // and must reflect changes on the next load, not just after a rebuild.
@@ -14,13 +15,6 @@ interface Court {
 }
 
 const WEEKDAY_LABELS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
-
-function formatHour(hour: number) {
-  const period = hour >= 12 ? 'PM' : 'AM';
-  let displayHour = hour % 12;
-  if (displayHour === 0) displayHour = 12;
-  return `${displayHour}:00 ${period}`;
-}
 
 function formatOpenDays(openDays: number[]) {
   if (openDays.length === 7) return 'Every day';
@@ -181,8 +175,8 @@ export default async function LandingPage() {
         <div className="max-w-3xl mx-auto px-4 text-center">
           <h2 className="font-display text-2xl mb-2 tracking-wide">Hours</h2>
           <p className="text-white/80">
-            {formatOpenDays(settings.open_days)} · {formatHour(settings.opening_hour)} –{' '}
-            {formatHour(settings.closing_hour)}
+            {formatOpenDays(settings.open_days)} · {formatHourLabel(settings.opening_hour)} –{' '}
+            {formatHourLabel(settings.closing_hour)}
           </p>
         </div>
       </section>

@@ -1,6 +1,14 @@
 import type { Metadata } from "next";
 import { Geist, Geist_Mono, Anton } from "next/font/google";
+import { createPublicServerClient } from "@/lib/supabase/publicServerClient";
+import { fetchSiteSettings } from "@/lib/siteSettings";
 import "./globals.css";
+
+// The favicon needs to reflect the admin-uploaded logo (Branding &
+// Settings), which can change at runtime — so it's fetched per-request
+// here rather than a static file, matching the rest of the site's
+// admin-editable content.
+export const dynamic = "force-dynamic";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -21,10 +29,16 @@ const anton = Anton({
   variable: "--font-anton",
 });
 
-export const metadata: Metadata = {
-  title: "MP2H Pickleball Booking System",
-  description: "Powered by Good Steward",
-};
+export async function generateMetadata(): Promise<Metadata> {
+  const supabase = createPublicServerClient();
+  const settings = await fetchSiteSettings(supabase);
+
+  return {
+    title: "MP2H Pickleball Booking System",
+    description: "Powered by Good Steward",
+    icons: settings.logo_url ? { icon: settings.logo_url } : undefined,
+  };
+}
 
 export default function RootLayout({
   children,

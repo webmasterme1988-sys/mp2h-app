@@ -26,6 +26,8 @@ interface Booking {
   receipt_url: string | null;
   created_at: string;
   price: number | null;
+  checked_in: boolean;
+  checked_in_at: string | null;
   courts: { name: string } | null;
 }
 
@@ -47,6 +49,8 @@ interface TransactionGroup {
   totalPrice: number | null;
   status: BookingStatus | 'mixed';
   receiptUrl: string | null;
+  checkedIn: boolean;
+  checkedInAt: string | null;
 }
 
 function formatDateTime(iso: string) {
@@ -106,6 +110,8 @@ function getPresetRange(mode: DateFilterMode): { from: string; to: string } {
 
   return { from: '', to: '' };
 }
+
+const PAGE_SIZE_OPTIONS = [10, 50, 100, 200, 500, 1000];
 
 const STATUS_STYLES: Record<BookingStatus | 'mixed', string> = {
   pending: 'bg-amber-100 text-amber-700',
@@ -172,6 +178,10 @@ export default function BookingsTab() {
   const [sortColumn, setSortColumn] = useState<SortColumn | null>(null);
   const [sortDirection, setSortDirection] = useState<'asc' | 'desc'>('asc');
 
+  // ---------- Pagination ----------
+  const [pageSize, setPageSize] = useState(10);
+  const [currentPage, setCurrentPage] = useState(1);
+
   // ---------- Details modal ----------
   const [detailsKey, setDetailsKey] = useState<string | null>(null);
 
@@ -180,6 +190,10 @@ export default function BookingsTab() {
   const [bulkActionError, setBulkActionError] = useState<{ key: string; message: string } | null>(
     null
   );
+
+  // ---------- Check-in ----------
+  const [checkingInKey, setCheckingInKey] = useState<string | null>(null);
+  const [checkInError, setCheckInError] = useState<string | null>(null);
 
   useEffect(() => {
     fetchSiteSettings(supabase).then(setSettings);
@@ -215,6 +229,7 @@ export default function BookingsTab() {
     setStatusFilter('all');
     setCourtFilter('all');
     setPhoneSearch('');
+    setCurrentPage(1);
   }
 
   const filtersActive =
@@ -256,7 +271,7 @@ export default function BookingsTab() {
     let query = supabase
       .from('bookings')
       .select(
-        'id, court_id, transaction_id, player_name, player_phone, player_email, start_time, end_time, status, receipt_url, created_at, price, courts(name)'
+        'id, court_id, transaction_id, player_name, player_phone, player_email, start_time, end_time, status, receipt_url, created_at, price, checked_in, checked_in_at, courts(name)'
       )
       .order('id', { ascending: false });
 
@@ -349,6 +364,16 @@ export default function BookingsTab() {
         (min, b) => (b.created_at < min ? b.created_at : min),
         sorted[0].created_at
       );
+      // Checking in happens once, when the client physically arrives —
+      // treated as a single transaction-level event rather than per slot,
+      // so the group only counts as checked in once every slot in it does.
+      const checkedIn = sorted.every((b) => b.checked_in);
+      const checkedInAt = checkedIn
+        ? sorted.reduce(
+            (min, b) => (b.checked_in_at && b.checked_in_at < min ? b.checked_in_at : min),
+            sorted[0].checked_in_at ?? ''
+          )
+        : null;
 
       groups.push({
         key,
@@ -363,6 +388,8 @@ export default function BookingsTab() {
         totalPrice,
         status,
         receiptUrl: first.receipt_url,
+        checkedIn,
+        checkedInAt,
       });
     }
     return groups;
@@ -416,6 +443,18 @@ export default function BookingsTab() {
     });
     return sorted;
   }, [transactionGroups, sortColumn, sortDirection]);
+
+  // Clamped for display rather than written back to state — if a filter
+  // change shrinks the result set out from under the current page, this
+  // pulls the visible page back into range without an extra effect just
+  // to keep `currentPage` itself in sync.
+  const totalPages = Math.max(1, Math.ceil(sortedGroups.length / pageSize));
+  const safePage = Math.min(currentPage, totalPages);
+
+  const paginatedGroups = useMemo(() => {
+    const start = (safePage - 1) * pageSize;
+    return sortedGroups.slice(start, start + pageSize);
+  }, [sortedGroups, safePage, pageSize]);
 
   const detailsGroup = sortedGroups.find((g) => g.key === detailsKey) ?? null;
 
@@ -508,6 +547,29 @@ export default function BookingsTab() {
         message: `${failures} of ${targets.length} slot(s) couldn't be updated — open View Details to resolve individually.`,
       });
     }
+  }
+
+  async function handleCheckIn(group: TransactionGroup, checkedIn: boolean) {
+    setCheckingInKey(group.key);
+    setCheckInError(null);
+
+    const { error } = await supabase
+      .from('bookings')
+      .update({ checked_in: checkedIn, checked_in_at: checkedIn ? new Date().toISOString() : null })
+      .in(
+        'id',
+        group.bookings.map((b) => b.id)
+      );
+
+    if (error) {
+      console.error(`Failed to update check-in for transaction ${group.key}:`, error);
+      setCheckInError(`Could not update check-in status: ${error.message}`);
+      setCheckingInKey(null);
+      return;
+    }
+
+    setCheckingInKey(null);
+    await fetchBookings();
   }
 
   // ---------- Reschedule ----------
@@ -740,7 +802,7 @@ export default function BookingsTab() {
                 <tr className="border-b border-slate-200 text-left text-xs font-medium text-slate-500 uppercase tracking-wide">
                   <SortHeader column="player" sortColumn={sortColumn} sortDirection={sortDirection} onSort={handleSort}>Player</SortHeader>
                   <SortHeader column="phone" sortColumn={sortColumn} sortDirection={sortDirection} onSort={handleSort}>Phone</SortHeader>
-                  <SortHeader column="transaction" sortColumn={sortColumn} sortDirection={sortDirection} onSort={handleSort}>Transaction #</SortHeader>
+                  <SortHeader column="transaction" sortColumn={sortColumn} sortDirection={sortDirection} onSort={handleSort}>Confirmation #</SortHeader>
                   <SortHeader column="date" sortColumn={sortColumn} sortDirection={sortDirection} onSort={handleSort}>Date &amp; Time</SortHeader>
                   <SortHeader column="court" sortColumn={sortColumn} sortDirection={sortDirection} onSort={handleSort}>Court</SortHeader>
                   <SortHeader column="hours" sortColumn={sortColumn} sortDirection={sortDirection} onSort={handleSort}>Total Hours</SortHeader>
@@ -753,7 +815,7 @@ export default function BookingsTab() {
                 </tr>
               </thead>
               <tbody>
-                {sortedGroups.map((group) => {
+                {paginatedGroups.map((group) => {
                   const isBulkUpdating = bulkUpdatingKey === group.key;
                   const hasHoldExpired = group.bookings.some(isHoldExpired);
                   return (
@@ -844,6 +906,54 @@ export default function BookingsTab() {
             </table>
           </div>
         )}
+
+        {sortedGroups.length > 0 && (
+          <div className="flex flex-col sm:flex-row items-center justify-between gap-3 px-4 sm:px-6 py-3 border-t border-slate-100 text-sm">
+            <div className="flex items-center gap-2 text-slate-500">
+              <span>Show</span>
+              <select
+                value={pageSize}
+                onChange={(e) => {
+                  setPageSize(Number(e.target.value));
+                  setCurrentPage(1);
+                }}
+                className="rounded-lg border border-slate-300 px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
+              >
+                {PAGE_SIZE_OPTIONS.map((size) => (
+                  <option key={size} value={size}>
+                    {size}
+                  </option>
+                ))}
+              </select>
+              <span>entries</span>
+            </div>
+
+            <p className="text-slate-500">
+              Showing {(safePage - 1) * pageSize + 1}–
+              {Math.min(safePage * pageSize, sortedGroups.length)} of {sortedGroups.length}
+            </p>
+
+            <div className="flex items-center gap-2">
+              <button
+                onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
+                disabled={safePage <= 1}
+                className="rounded-lg bg-slate-100 text-slate-700 border border-slate-200 text-xs font-medium px-3 py-1.5 hover:bg-slate-200 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+              >
+                Previous
+              </button>
+              <span className="text-slate-500 text-xs whitespace-nowrap">
+                Page {safePage} of {totalPages}
+              </span>
+              <button
+                onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
+                disabled={safePage >= totalPages}
+                className="rounded-lg bg-slate-100 text-slate-700 border border-slate-200 text-xs font-medium px-3 py-1.5 hover:bg-slate-200 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+              >
+                Next
+              </button>
+            </div>
+          </div>
+        )}
       </section>
 
       {/* Receipt Modal */}
@@ -890,7 +1000,7 @@ export default function BookingsTab() {
             <div className="sticky top-0 bg-white border-b border-slate-200 px-5 py-4 flex items-center justify-between">
               <div>
                 <h3 className="font-semibold text-slate-800">
-                  Transaction {detailsGroup.transactionId !== null ? `#${detailsGroup.transactionId}` : ''}
+                  Confirmation {detailsGroup.transactionId !== null ? `#${detailsGroup.transactionId}` : ''}
                 </h3>
                 <p className="text-xs text-slate-500 mt-0.5">
                   {detailsGroup.playerName} · {detailsGroup.courtName} ·{' '}
@@ -917,6 +1027,41 @@ export default function BookingsTab() {
                   </span>
                 )}
               </div>
+
+              <div className="flex items-center justify-between rounded-xl border border-slate-200 px-3 py-2.5">
+                <div>
+                  {detailsGroup.checkedIn ? (
+                    <>
+                      <span className="inline-block rounded-full bg-emerald-100 text-emerald-700 px-2.5 py-1 text-xs font-medium">
+                        ✓ Checked in
+                      </span>
+                      {detailsGroup.checkedInAt && (
+                        <p className="text-xs text-slate-500 mt-1">
+                          {formatDateTime(detailsGroup.checkedInAt)}
+                        </p>
+                      )}
+                    </>
+                  ) : (
+                    <span className="text-sm text-slate-500">Not checked in yet</span>
+                  )}
+                </div>
+                <button
+                  onClick={() => handleCheckIn(detailsGroup, !detailsGroup.checkedIn)}
+                  disabled={checkingInKey === detailsGroup.key}
+                  className={
+                    detailsGroup.checkedIn
+                      ? 'rounded-lg bg-slate-100 text-slate-700 border border-slate-200 text-xs font-medium px-3 py-1.5 hover:bg-slate-200 disabled:opacity-40 disabled:cursor-not-allowed transition-colors'
+                      : 'rounded-lg bg-[var(--admin-btn-bg)] text-[var(--admin-btn-label)] text-xs font-medium px-3 py-1.5 hover:brightness-90 disabled:opacity-40 disabled:cursor-not-allowed transition-colors'
+                  }
+                >
+                  {checkingInKey === detailsGroup.key
+                    ? 'Saving…'
+                    : detailsGroup.checkedIn
+                      ? 'Undo Check-In'
+                      : 'Check In'}
+                </button>
+              </div>
+              {checkInError && <p className="text-xs text-red-600">{checkInError}</p>}
 
               {detailsGroup.receiptUrl ? (
                 <button

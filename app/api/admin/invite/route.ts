@@ -55,8 +55,16 @@ export async function POST(request: NextRequest) {
     );
   }
 
+  // Prefer an explicitly configured production URL over the incoming
+  // request's own origin — otherwise an invite sent while testing locally
+  // would point recipients at an unreachable localhost link. Supabase also
+  // requires this exact URL to be allow-listed under Authentication → URL
+  // Configuration → Redirect URLs, or it silently falls back to the
+  // project's default Site URL instead of honoring redirectTo.
+  const siteUrl = process.env.NEXT_PUBLIC_SITE_URL || request.url;
+
   const { error } = await supabaseAdmin.auth.admin.inviteUserByEmail(email, {
-    redirectTo: new URL('/admin/set-password', request.url).toString(),
+    redirectTo: new URL('/admin/set-password', siteUrl).toString(),
   });
 
   if (error) {

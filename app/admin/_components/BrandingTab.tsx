@@ -27,6 +27,7 @@ export default function BrandingTab() {
   const [logoFile, setLogoFile] = useState<File | null>(null);
   const [logoPreview, setLogoPreview] = useState<string | null>(null);
   const [removeLogo, setRemoveLogo] = useState(false);
+  const [logoHeight, setLogoHeight] = useState(DEFAULT_SITE_SETTINGS.logo_height);
 
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -47,6 +48,7 @@ export default function BrandingTab() {
       setAdminTabActiveBgColor(loaded.admin_tab_active_bg_color);
       setSubmitButtonLabel(loaded.submit_button_label);
       setPaymentNote(loaded.payment_note ?? '');
+      setLogoHeight(loaded.logo_height);
       setLoading(false);
     });
   }, []);
@@ -81,6 +83,7 @@ export default function BrandingTab() {
         admin_tab_active_bg_color: adminTabActiveBgColor,
         submit_button_label: submitButtonLabel.trim() || DEFAULT_SITE_SETTINGS.submit_button_label,
         logo_url: logoUrl,
+        logo_height: logoHeight,
         payment_note: paymentNote.trim() || null,
       });
 
@@ -309,7 +312,8 @@ export default function BrandingTab() {
                 <img
                   src={currentLogo}
                   alt="Logo preview"
-                  className="h-16 w-auto object-contain mb-2 rounded border border-slate-200 bg-slate-50 p-2"
+                  style={{ height: logoHeight }}
+                  className="w-auto object-contain mb-2 rounded border border-slate-200 bg-slate-50 p-2"
                 />
               )}
               <input
@@ -333,6 +337,35 @@ export default function BrandingTab() {
                   Remove logo
                 </button>
               )}
+
+              <div className="mt-4">
+                <label className="block text-sm font-medium text-slate-600 mb-1">
+                  Logo Size <span className="text-slate-400 font-normal">({logoHeight}px tall)</span>
+                </label>
+                <p className="text-xs text-slate-400 mb-1.5">
+                  Controls the logo&apos;s height wherever it appears — the landing page header and the
+                  booking page header. Width scales automatically to match.
+                </p>
+                <div className="flex items-center gap-3">
+                  <input
+                    type="range"
+                    min={20}
+                    max={160}
+                    step={2}
+                    value={logoHeight}
+                    onChange={(e) => setLogoHeight(Number(e.target.value))}
+                    className="flex-1"
+                  />
+                  <input
+                    type="number"
+                    min={20}
+                    max={160}
+                    value={logoHeight}
+                    onChange={(e) => setLogoHeight(Number(e.target.value))}
+                    className="w-20 rounded-xl border border-slate-300 px-2 py-1.5 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                  />
+                </div>
+              </div>
             </div>
 
             {error && <p className="text-sm text-red-600">{error}</p>}

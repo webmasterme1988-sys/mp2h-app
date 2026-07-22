@@ -18,6 +18,10 @@ export default function LandingPageTab() {
   const [contactEmail, setContactEmail] = useState('');
   const [facebookUrl, setFacebookUrl] = useState('');
   const [instagramUrl, setInstagramUrl] = useState('');
+  const [tiktokUrl, setTiktokUrl] = useState('');
+  const [youtubeUrl, setYoutubeUrl] = useState('');
+  const [twitterUrl, setTwitterUrl] = useState('');
+  const [whatsappNumber, setWhatsappNumber] = useState('');
   const [googleMapsUrl, setGoogleMapsUrl] = useState('');
   const [facebookPageId, setFacebookPageId] = useState('');
   const [enableFbChat, setEnableFbChat] = useState(false);
@@ -36,6 +40,10 @@ export default function LandingPageTab() {
       setContactEmail(loaded.landing_contact_email ?? '');
       setFacebookUrl(loaded.landing_facebook_url ?? '');
       setInstagramUrl(loaded.landing_instagram_url ?? '');
+      setTiktokUrl(loaded.landing_tiktok_url ?? '');
+      setYoutubeUrl(loaded.landing_youtube_url ?? '');
+      setTwitterUrl(loaded.landing_twitter_url ?? '');
+      setWhatsappNumber(loaded.landing_whatsapp_number ?? '');
       setGoogleMapsUrl(loaded.landing_google_maps_url ?? '');
       setFacebookPageId(loaded.landing_facebook_page_id ?? '');
       setEnableFbChat(loaded.landing_enable_fb_chat ?? false);
@@ -59,6 +67,10 @@ export default function LandingPageTab() {
       landing_contact_email: contactEmail.trim() || null,
       landing_facebook_url: facebookUrl.trim() || null,
       landing_instagram_url: instagramUrl.trim() || null,
+      landing_tiktok_url: tiktokUrl.trim() || null,
+      landing_youtube_url: youtubeUrl.trim() || null,
+      landing_twitter_url: twitterUrl.trim() || null,
+      landing_whatsapp_number: whatsappNumber.trim() || null,
       landing_google_maps_url: googleMapsUrl.trim() || null,
       landing_facebook_page_id: facebookPageId.trim() || null,
       landing_enable_fb_chat: enableFbChat,
@@ -151,29 +163,89 @@ export default function LandingPageTab() {
                   className="w-full rounded-xl border border-slate-300 px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
                 />
               </div>
-              <div>
-                <label className="block text-sm font-medium text-slate-600 mb-1">
-                  Facebook URL
-                </label>
-                <input
-                  type="url"
-                  value={facebookUrl}
-                  onChange={(e) => setFacebookUrl(e.target.value)}
-                  placeholder="https://facebook.com/…"
-                  className="w-full rounded-xl border border-slate-300 px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-slate-600 mb-1">
-                  Instagram URL
-                </label>
-                <input
-                  type="url"
-                  value={instagramUrl}
-                  onChange={(e) => setInstagramUrl(e.target.value)}
-                  placeholder="https://instagram.com/…"
-                  className="w-full rounded-xl border border-slate-300 px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
-                />
+            </div>
+
+            <div>
+              <p className="text-sm font-medium text-slate-600 mb-2">Social Links</p>
+              <p className="text-xs text-slate-400 mb-3">
+                Shown as icons in the landing page footer. Leave any blank to hide that icon.
+              </p>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div>
+                  <label className="block text-sm font-medium text-slate-600 mb-1">
+                    Facebook URL
+                  </label>
+                  <input
+                    type="url"
+                    value={facebookUrl}
+                    onChange={(e) => setFacebookUrl(e.target.value)}
+                    placeholder="https://facebook.com/…"
+                    className="w-full rounded-xl border border-slate-300 px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-slate-600 mb-1">
+                    Instagram URL
+                  </label>
+                  <input
+                    type="url"
+                    value={instagramUrl}
+                    onChange={(e) => setInstagramUrl(e.target.value)}
+                    placeholder="https://instagram.com/…"
+                    className="w-full rounded-xl border border-slate-300 px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-slate-600 mb-1">
+                    TikTok URL
+                  </label>
+                  <input
+                    type="url"
+                    value={tiktokUrl}
+                    onChange={(e) => setTiktokUrl(e.target.value)}
+                    placeholder="https://tiktok.com/@…"
+                    className="w-full rounded-xl border border-slate-300 px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-slate-600 mb-1">
+                    YouTube URL
+                  </label>
+                  <input
+                    type="url"
+                    value={youtubeUrl}
+                    onChange={(e) => setYoutubeUrl(e.target.value)}
+                    placeholder="https://youtube.com/@…"
+                    className="w-full rounded-xl border border-slate-300 px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-slate-600 mb-1">
+                    Twitter / X URL
+                  </label>
+                  <input
+                    type="url"
+                    value={twitterUrl}
+                    onChange={(e) => setTwitterUrl(e.target.value)}
+                    placeholder="https://x.com/…"
+                    className="w-full rounded-xl border border-slate-300 px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-slate-600 mb-1">
+                    WhatsApp Number
+                  </label>
+                  <input
+                    type="tel"
+                    value={whatsappNumber}
+                    onChange={(e) => setWhatsappNumber(e.target.value)}
+                    placeholder="+63 917 123 4567"
+                    className="w-full rounded-xl border border-slate-300 px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
+                  />
+                  <p className="text-xs text-slate-400 mt-1">
+                    Include the country code. The icon opens a WhatsApp chat with this number.
+                  </p>
+                </div>
               </div>
             </div>
 
@@ -290,7 +362,29 @@ function PhotoGallerySection() {
   const [addingPhoto, setAddingPhoto] = useState(false);
   const [removingPhotoId, setRemovingPhotoId] = useState<number | null>(null);
 
+  const [showGallery, setShowGallery] = useState(true);
+  const [toggleSaving, setToggleSaving] = useState(false);
+
   const newFileInputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    fetchSiteSettings(supabase).then((loaded) => {
+      setShowGallery(loaded.landing_show_gallery);
+    });
+  }, []);
+
+  async function handleToggleGallery(checked: boolean) {
+    setShowGallery(checked);
+    setToggleSaving(true);
+    const { error } = await supabase
+      .from('site_settings')
+      .upsert({ id: 1, landing_show_gallery: checked });
+    if (error) {
+      setPhotosError(`Could not save: ${error.message}`);
+      setShowGallery(!checked);
+    }
+    setToggleSaving(false);
+  }
 
   const fetchPhotos = useCallback(async () => {
     setPhotosLoading(true);
@@ -362,9 +456,21 @@ function PhotoGallerySection() {
     <section className="bg-white rounded-2xl shadow-sm border border-slate-200 p-4 sm:p-6 max-w-2xl">
       <h2 className="text-lg font-semibold text-slate-800 mb-1">Photo Gallery</h2>
       <p className="text-sm text-slate-500 mb-4">
-        Up to {MAX_LANDING_PHOTOS} photos shown on the landing page — court shots, events, the
-        community in action.
+        Up to {MAX_LANDING_PHOTOS} photos shown on the landing page, below the Hours section —
+        court shots, events, the community in action. Click a photo on the landing page to view
+        it full-size with next/prev navigation.
       </p>
+
+      <label className="flex items-center gap-2 text-sm text-slate-700 mb-4">
+        <input
+          type="checkbox"
+          checked={showGallery}
+          disabled={toggleSaving}
+          onChange={(e) => handleToggleGallery(e.target.checked)}
+          className="h-4 w-4 rounded border-slate-300"
+        />
+        Show gallery section on the landing page
+      </label>
 
       {photosError && <p className="text-sm text-red-600 mb-3">{photosError}</p>}
 

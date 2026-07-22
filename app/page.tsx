@@ -3,6 +3,15 @@ import { createPublicServerClient } from '@/lib/supabase/publicServerClient';
 import { fetchSiteSettings } from '@/lib/siteSettings';
 import { fetchLandingPhotos } from '@/lib/landingPhotos';
 import { formatHourLabel } from '@/lib/timeSlots';
+import GalleryLightbox from '@/components/GalleryLightbox';
+import {
+  FacebookIcon,
+  InstagramIcon,
+  TiktokIcon,
+  YoutubeIcon,
+  TwitterIcon,
+  WhatsappIcon,
+} from '@/components/SocialIcons';
 
 // Content here (about/policy text, photos, contact info) is admin-editable
 // and must reflect changes on the next load, not just after a rebuild.
@@ -32,12 +41,21 @@ export default async function LandingPage() {
 
   const courts = (courtsResult.data ?? []) as Court[];
   const tagline = settings.landing_tagline || settings.site_subtitle;
+  const whatsappUrl = settings.landing_whatsapp_number
+    ? `https://wa.me/${settings.landing_whatsapp_number.replace(/\D/g, '')}`
+    : null;
+  const hasSocialLinks =
+    settings.landing_facebook_url ||
+    settings.landing_instagram_url ||
+    settings.landing_tiktok_url ||
+    settings.landing_youtube_url ||
+    settings.landing_twitter_url ||
+    whatsappUrl;
   const hasContact =
     settings.landing_address ||
     settings.landing_contact_phone ||
     settings.landing_contact_email ||
-    settings.landing_facebook_url ||
-    settings.landing_instagram_url;
+    hasSocialLinks;
 
   const mapsEmbedUrl = settings.landing_address
     ? `https://www.google.com/maps?q=${encodeURIComponent(settings.landing_address)}&output=embed`
@@ -60,7 +78,8 @@ export default async function LandingPage() {
               <img
                 src={settings.logo_url}
                 alt={settings.site_title}
-                className="h-10 w-auto object-contain shrink-0"
+                style={{ height: settings.logo_height }}
+                className="w-auto object-contain shrink-0"
               />
             )}
             <span className="font-display text-lg sm:text-xl tracking-wide truncate">
@@ -146,30 +165,6 @@ export default async function LandingPage() {
         </section>
       )}
 
-      {/* Gallery */}
-      {photos.length > 0 && (
-        <section className="max-w-5xl mx-auto px-4 py-16">
-          <h2 className="font-display text-3xl text-mp2h-navy mb-6 text-center tracking-wide">
-            Gallery
-          </h2>
-          <div className="grid grid-cols-2 sm:grid-cols-3 gap-3">
-            {photos.map((photo) => (
-              <div key={photo.id} className="rounded-2xl overflow-hidden border border-slate-200">
-                {/* eslint-disable-next-line @next/next/no-img-element */}
-                <img
-                  src={photo.image_url}
-                  alt={photo.caption ?? ''}
-                  className="w-full h-40 object-cover"
-                />
-                {photo.caption && (
-                  <p className="text-xs text-slate-500 px-2 py-1.5">{photo.caption}</p>
-                )}
-              </div>
-            ))}
-          </div>
-        </section>
-      )}
-
       {/* Hours */}
       <section className="bg-mp2h-navy text-white py-12">
         <div className="max-w-3xl mx-auto px-4 text-center">
@@ -180,6 +175,16 @@ export default async function LandingPage() {
           </p>
         </div>
       </section>
+
+      {/* Gallery */}
+      {settings.landing_show_gallery && photos.length > 0 && (
+        <section className="max-w-5xl mx-auto px-4 py-16">
+          <h2 className="font-display text-3xl text-mp2h-navy mb-6 text-center tracking-wide">
+            Gallery
+          </h2>
+          <GalleryLightbox photos={photos} />
+        </section>
+      )}
 
       {/* Location & Directions */}
       {mapsEmbedUrl && (
@@ -242,16 +247,17 @@ export default async function LandingPage() {
                   {settings.landing_contact_email}
                 </p>
               )}
-              {(settings.landing_facebook_url || settings.landing_instagram_url) && (
-                <div className="flex items-center justify-center gap-4 pt-1">
+              {hasSocialLinks && (
+                <div className="flex items-center justify-center gap-4 pt-2">
                   {settings.landing_facebook_url && (
                     <a
                       href={settings.landing_facebook_url}
                       target="_blank"
                       rel="noreferrer"
-                      className="text-mp2h-lime hover:brightness-90 text-sm underline underline-offset-2"
+                      aria-label="Facebook"
+                      className="text-white/80 hover:text-mp2h-lime transition-colors"
                     >
-                      Facebook
+                      <FacebookIcon className="w-5 h-5" />
                     </a>
                   )}
                   {settings.landing_instagram_url && (
@@ -259,9 +265,54 @@ export default async function LandingPage() {
                       href={settings.landing_instagram_url}
                       target="_blank"
                       rel="noreferrer"
-                      className="text-mp2h-lime hover:brightness-90 text-sm underline underline-offset-2"
+                      aria-label="Instagram"
+                      className="text-white/80 hover:text-mp2h-lime transition-colors"
                     >
-                      Instagram
+                      <InstagramIcon className="w-5 h-5" />
+                    </a>
+                  )}
+                  {settings.landing_tiktok_url && (
+                    <a
+                      href={settings.landing_tiktok_url}
+                      target="_blank"
+                      rel="noreferrer"
+                      aria-label="TikTok"
+                      className="text-white/80 hover:text-mp2h-lime transition-colors"
+                    >
+                      <TiktokIcon className="w-5 h-5" />
+                    </a>
+                  )}
+                  {settings.landing_youtube_url && (
+                    <a
+                      href={settings.landing_youtube_url}
+                      target="_blank"
+                      rel="noreferrer"
+                      aria-label="YouTube"
+                      className="text-white/80 hover:text-mp2h-lime transition-colors"
+                    >
+                      <YoutubeIcon className="w-5 h-5" />
+                    </a>
+                  )}
+                  {settings.landing_twitter_url && (
+                    <a
+                      href={settings.landing_twitter_url}
+                      target="_blank"
+                      rel="noreferrer"
+                      aria-label="Twitter / X"
+                      className="text-white/80 hover:text-mp2h-lime transition-colors"
+                    >
+                      <TwitterIcon className="w-5 h-5" />
+                    </a>
+                  )}
+                  {whatsappUrl && (
+                    <a
+                      href={whatsappUrl}
+                      target="_blank"
+                      rel="noreferrer"
+                      aria-label="WhatsApp"
+                      className="text-white/80 hover:text-mp2h-lime transition-colors"
+                    >
+                      <WhatsappIcon className="w-5 h-5" />
                     </a>
                   )}
                 </div>

@@ -476,7 +476,8 @@ export default function BookingPageClient({
             <img
               src={settings.logo_url}
               alt={settings.site_title}
-              className="h-12 w-auto mx-auto mb-2 object-contain"
+              style={{ height: settings.logo_height }}
+              className="w-auto mx-auto mb-2 object-contain"
             />
           )}
           <h1 className="text-2xl sm:text-3xl font-bold tracking-tight">{settings.site_title}</h1>

@@ -9,6 +9,7 @@ export interface SiteSettings {
   site_title: string;
   site_subtitle: string;
   logo_url: string | null;
+  logo_height: number;
   primary_color: string;
   selection_color: string;
   button_bg_color: string;
@@ -44,6 +45,11 @@ export interface SiteSettings {
   landing_google_maps_url: string | null;
   landing_facebook_page_id: string | null;
   landing_enable_fb_chat: boolean;
+  landing_show_gallery: boolean;
+  landing_tiktok_url: string | null;
+  landing_youtube_url: string | null;
+  landing_twitter_url: string | null;
+  landing_whatsapp_number: string | null;
 }
 
 // Matches the current hardcoded look of the app, so sites that haven't
@@ -53,6 +59,7 @@ export const DEFAULT_SITE_SETTINGS: SiteSettings = {
   site_title: 'MP2H Pickleball',
   site_subtitle: 'Book a court online — quick, easy, and no phone calls needed.',
   logo_url: null,
+  logo_height: 48, // px
   primary_color: '#059669', // Tailwind emerald-600
   selection_color: '#059669',
   button_bg_color: '#059669',
@@ -87,10 +94,15 @@ export const DEFAULT_SITE_SETTINGS: SiteSettings = {
   landing_google_maps_url: null,
   landing_facebook_page_id: null,
   landing_enable_fb_chat: false,
+  landing_show_gallery: true,
+  landing_tiktok_url: null,
+  landing_youtube_url: null,
+  landing_twitter_url: null,
+  landing_whatsapp_number: null,
 };
 
 const SITE_SETTINGS_COLUMNS =
-  'site_title, site_subtitle, logo_url, primary_color, selection_color, button_bg_color, button_label_color, submit_button_label, gcash_qr_url, payment_note, opening_hour, closing_hour, open_days, pending_hold_minutes, auto_confirm_bookings, allow_multi_slot_booking, show_price, pricing_mode, flat_price, notify_customer_on_approval, attach_marketing_image, marketing_image_url, customer_email_footer_html, attach_receipt_to_customer_email, admin_tab_font_color, admin_tab_active_bg_color, landing_tagline, landing_about_html, landing_policy_html, landing_address, landing_contact_phone, landing_contact_email, landing_facebook_url, landing_instagram_url, landing_google_maps_url, landing_facebook_page_id, landing_enable_fb_chat';
+  'site_title, site_subtitle, logo_url, logo_height, primary_color, selection_color, button_bg_color, button_label_color, submit_button_label, gcash_qr_url, payment_note, opening_hour, closing_hour, open_days, pending_hold_minutes, auto_confirm_bookings, allow_multi_slot_booking, show_price, pricing_mode, flat_price, notify_customer_on_approval, attach_marketing_image, marketing_image_url, customer_email_footer_html, attach_receipt_to_customer_email, admin_tab_font_color, admin_tab_active_bg_color, landing_tagline, landing_about_html, landing_policy_html, landing_address, landing_contact_phone, landing_contact_email, landing_facebook_url, landing_instagram_url, landing_google_maps_url, landing_facebook_page_id, landing_enable_fb_chat, landing_show_gallery, landing_tiktok_url, landing_youtube_url, landing_twitter_url, landing_whatsapp_number';
 
 // Branding is a nice-to-have, not core booking functionality — if the table
 // isn't set up yet or the query fails for any reason, fall back to defaults

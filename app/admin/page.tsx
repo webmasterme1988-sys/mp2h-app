@@ -10,6 +10,7 @@ import BlockSlotsTab from './_components/BlockSlotsTab';
 import HoursTab from './_components/HoursTab';
 import PricingTab from './_components/PricingTab';
 import BrandingTab from './_components/BrandingTab';
+import LandingPageTab from './_components/LandingPageTab';
 import BlacklistTab from './_components/BlacklistTab';
 import ReportsTab from './_components/ReportsTab';
 import AdminsTab from './_components/AdminsTab';
@@ -23,6 +24,7 @@ type TabId =
   | 'hours'
   | 'pricing'
   | 'branding'
+  | 'landing'
   | 'blacklist'
   | 'reports'
   | 'admins'
@@ -35,6 +37,7 @@ const TABS: { id: TabId; label: string; superAdminOnly?: boolean }[] = [
   { id: 'hours', label: 'Hours & Holidays' },
   { id: 'pricing', label: 'Booking & Pricing' },
   { id: 'branding', label: 'Branding & Settings' },
+  { id: 'landing', label: 'Landing Page' },
   { id: 'blacklist', label: 'Blacklist' },
   { id: 'reports', label: 'Reports' },
   { id: 'admins', label: 'Admins', superAdminOnly: true },
@@ -333,6 +336,7 @@ export default function AdminPage() {
             {activeTab === 'hours' && <HoursTab />}
             {activeTab === 'pricing' && <PricingTab />}
             {activeTab === 'branding' && <BrandingTab />}
+            {activeTab === 'landing' && <LandingPageTab />}
             {activeTab === 'blacklist' && <BlacklistTab />}
             {activeTab === 'reports' && <ReportsTab />}
             {activeTab === 'admins' && isSuperAdmin && <AdminsTab />}

@@ -15,6 +15,13 @@
   --color-foreground: var(--foreground);
   --font-sans: var(--font-geist-sans);
   --font-mono: var(--font-geist-mono);
+  --font-display: var(--font-anton);
+
+  /* MP2H brand kit — pulled from the club's actual poster/logo, used on
+     the marketing landing page only (the booking flow keeps its own
+     separately admin-configurable colors in Branding & Settings). */
+  --color-mp2h-navy: #0b1830;
+  --color-mp2h-lime: #8dc63f;
 }
 
 body {
@@ -30,4 +37,32 @@ input,
 select,
 textarea {
   color: #0f172a;
+}
+
+/* Tailwind's preflight strips default browser styling from paragraphs,
+   lists, etc. — this restores just enough of it for admin-authored rich
+   text (the landing page's About/Policy sections, from RichTextEditor)
+   to render with normal spacing and bullets instead of looking flat. */
+.rich-content p {
+  margin-bottom: 0.75em;
+}
+.rich-content p:last-child {
+  margin-bottom: 0;
+}
+.rich-content ul {
+  list-style: disc;
+  padding-left: 1.5em;
+  margin-bottom: 0.75em;
+}
+.rich-content ol {
+  list-style: decimal;
+  padding-left: 1.5em;
+  margin-bottom: 0.75em;
+}
+.rich-content strong {
+  font-weight: 600;
+}
+.rich-content a {
+  text-decoration: underline;
+  text-underline-offset: 2px;
 }

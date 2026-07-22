@@ -460,6 +460,12 @@ export default function BookingPageClient({
       <header style={{ backgroundColor: settings.primary_color }} className="text-white">
         <div className="max-w-3xl mx-auto px-4 py-6 text-center relative">
           <a
+            href="/"
+            className="absolute left-4 top-6 text-sm text-white/80 hover:text-white underline underline-offset-2"
+          >
+            ← Home
+          </a>
+          <a
             href="/my-bookings"
             className="absolute right-4 top-6 text-sm text-white/80 hover:text-white underline underline-offset-2"
           >

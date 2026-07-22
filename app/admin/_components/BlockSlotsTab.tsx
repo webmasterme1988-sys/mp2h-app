@@ -31,10 +31,17 @@ function formatDateTime(iso: string) {
   });
 }
 
+// Deliberately does all arithmetic in UTC, never touching the local
+// timezone: constructing a Date from a bare "YYYY-MM-DDT00:00:00" string
+// parses it as LOCAL midnight, and in any timezone ahead of UTC (e.g. the
+// Philippines, UTC+8) that local midnight is still the previous UTC day —
+// so a naive setDate()+toISOString() round-trip can return the *same*
+// date it was given instead of the next one, which silently turns the
+// targetDates loop below into an infinite loop and freezes the tab.
 function addDays(iso: string, days: number) {
-  const d = new Date(`${iso}T00:00:00`);
-  d.setDate(d.getDate() + days);
-  return d.toISOString().split('T')[0];
+  const [year, month, day] = iso.split('-').map(Number);
+  const d = new Date(Date.UTC(year, month - 1, day + days));
+  return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}-${String(d.getUTCDate()).padStart(2, '0')}`;
 }
 
 // Blocking a wide range one day at a time would mean a lot of rows and a

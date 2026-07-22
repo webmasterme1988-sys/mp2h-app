@@ -173,6 +173,7 @@ export default function BookingsTab() {
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
   const [courtFilter, setCourtFilter] = useState<string>('all');
   const [phoneSearch, setPhoneSearch] = useState('');
+  const [confirmationSearch, setConfirmationSearch] = useState('');
 
   // ---------- Sorting ----------
   const [sortColumn, setSortColumn] = useState<SortColumn | null>(null);
@@ -214,13 +215,19 @@ export default function BookingsTab() {
 
   // Date/status/court are now applied server-side in fetchBookings (see
   // below) so the fetch itself stays bounded — this only handles the
-  // phone search, which stays client-side since it's live-typing and
-  // shouldn't trigger a network round-trip per keystroke.
+  // phone/confirmation# search, which stay client-side since they're
+  // live-typing and shouldn't trigger a network round-trip per keystroke.
   const filteredBookings = useMemo(() => {
     const phoneQuery = phoneSearch.trim().toLowerCase();
-    if (!phoneQuery) return bookings;
-    return bookings.filter((b) => b.player_phone.toLowerCase().includes(phoneQuery));
-  }, [bookings, phoneSearch]);
+    const confirmationQuery = confirmationSearch.trim();
+    return bookings.filter((b) => {
+      if (phoneQuery && !b.player_phone.toLowerCase().includes(phoneQuery)) return false;
+      if (confirmationQuery && !String(b.transaction_id ?? '').includes(confirmationQuery)) {
+        return false;
+      }
+      return true;
+    });
+  }, [bookings, phoneSearch, confirmationSearch]);
 
   function clearFilters() {
     setDateFilterMode('month');
@@ -229,11 +236,16 @@ export default function BookingsTab() {
     setStatusFilter('all');
     setCourtFilter('all');
     setPhoneSearch('');
+    setConfirmationSearch('');
     setCurrentPage(1);
   }
 
   const filtersActive =
-    dateFilterMode !== 'month' || statusFilter !== 'all' || courtFilter !== 'all' || phoneSearch.trim() !== '';
+    dateFilterMode !== 'month' ||
+    statusFilter !== 'all' ||
+    courtFilter !== 'all' ||
+    phoneSearch.trim() !== '' ||
+    confirmationSearch.trim() !== '';
 
   // Keeps the "hold expired" indicator live without needing a manual refresh.
   useEffect(() => {
@@ -755,6 +767,19 @@ export default function BookingsTab() {
               value={phoneSearch}
               onChange={(e) => setPhoneSearch(e.target.value)}
               placeholder="e.g. 0917"
+              className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
+            />
+          </div>
+
+          <div>
+            <label className="block text-xs font-medium text-slate-500 mb-1">
+              Search confirmation #
+            </label>
+            <input
+              type="text"
+              value={confirmationSearch}
+              onChange={(e) => setConfirmationSearch(e.target.value)}
+              placeholder="e.g. 1042"
               className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
             />
           </div>

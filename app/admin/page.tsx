@@ -44,6 +44,42 @@ const TABS: { id: TabId; label: string; superAdminOnly?: boolean }[] = [
   { id: 'danger', label: 'Danger Zone', superAdminOnly: true },
 ];
 
+// Anchored to Philippine time regardless of the admin's own device
+// timezone, matching the rest of the dashboard's time-of-day logic.
+function getGreeting() {
+  const hour = Number(
+    new Date().toLocaleString('en-US', { hour: 'numeric', hour12: false, timeZone: 'Asia/Manila' })
+  );
+  if (hour < 12) return 'Good morning';
+  if (hour < 18) return 'Good afternoon';
+  return 'Good evening';
+}
+
+// Its own component (rather than a `now` state on AdminPage itself) so the
+// tick only re-renders this small clock, not the whole dashboard tree —
+// the admin freeze bug fixed earlier this session came from exactly that
+// kind of top-level re-render on every tick.
+function AdminClock() {
+  const [now, setNow] = useState(() => new Date());
+
+  useEffect(() => {
+    const interval = setInterval(() => setNow(new Date()), 30000);
+    return () => clearInterval(interval);
+  }, []);
+
+  const formatted = now.toLocaleString('en-US', {
+    timeZone: 'Asia/Manila',
+    weekday: 'long',
+    year: 'numeric',
+    month: 'long',
+    day: 'numeric',
+    hour: 'numeric',
+    minute: '2-digit',
+  });
+
+  return <p className="mt-0.5 text-white/70 text-xs sm:text-sm">{formatted}</p>;
+}
+
 // Synthesized rather than an audio file — a short two-note chime via the
 // Web Audio API, so there's no asset to bundle or license.
 //
@@ -96,6 +132,7 @@ export default function AdminPage() {
 
   const [authChecking, setAuthChecking] = useState(true);
   const [isSuperAdmin, setIsSuperAdmin] = useState(false);
+  const [adminEmail, setAdminEmail] = useState<string | null>(null);
   const [activeTab, setActiveTab] = useState<TabId>('bookings');
   const activeTabRef = useRef<TabId>('bookings');
   const [changePasswordOpen, setChangePasswordOpen] = useState(false);
@@ -125,6 +162,7 @@ export default function AdminPage() {
         return;
       }
       setIsSuperAdmin(user.app_metadata?.role === 'super_admin');
+      setAdminEmail(user.email ?? null);
       setAuthChecking(false);
     });
 
@@ -263,7 +301,11 @@ export default function AdminPage() {
         <div className="max-w-6xl mx-auto px-4 py-6 flex items-center justify-between">
           <div>
             <h1 className="text-2xl sm:text-3xl font-bold tracking-tight">MP2H Admin</h1>
-            <p className="mt-1 text-white/80 text-sm sm:text-base">Manage court bookings.</p>
+            <p className="mt-1 text-white/80 text-sm sm:text-base">
+              {getGreeting()}
+              {adminEmail ? `, ${adminEmail}` : ''}!
+            </p>
+            <AdminClock />
           </div>
           <div className="flex gap-2">
             <button

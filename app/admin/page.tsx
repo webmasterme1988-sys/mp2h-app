@@ -43,11 +43,28 @@ const TABS: { id: TabId; label: string; superAdminOnly?: boolean }[] = [
 
 // Synthesized rather than an audio file — a short two-note chime via the
 // Web Audio API, so there's no asset to bundle or license.
-function playNotificationSound() {
-  try {
+//
+// One shared, lazily-created context reused for every notification rather
+// than a fresh `new AudioContext()` per call — a multi-slot booking fires
+// several realtime events in a burst, and browsers cap how many contexts
+// can exist concurrently (Chrome: ~6), so creating one per event could
+// start throwing partway through a burst.
+let sharedAudioContext: AudioContext | null = null;
+
+function getAudioContext(): AudioContext | null {
+  if (typeof window === 'undefined') return null;
+  if (!sharedAudioContext) {
     const AudioContextClass =
       window.AudioContext || (window as unknown as { webkitAudioContext: typeof AudioContext }).webkitAudioContext;
-    const ctx = new AudioContextClass();
+    sharedAudioContext = new AudioContextClass();
+  }
+  return sharedAudioContext;
+}
+
+function playNotificationSound() {
+  try {
+    const ctx = getAudioContext();
+    if (!ctx) return;
     const startTime = ctx.currentTime;
 
     [880, 1320].forEach((freq, i) => {
@@ -66,8 +83,6 @@ function playNotificationSound() {
       osc.start(noteStart);
       osc.stop(noteStart + 0.3);
     });
-
-    setTimeout(() => ctx.close(), 1000);
   } catch (err) {
     console.error('Could not play notification sound:', err);
   }
@@ -146,31 +161,55 @@ export default function AdminPage() {
   useEffect(() => {
     if (authChecking) return;
 
+    // A single multi-slot booking inserts one row per hour, each firing
+    // its own INSERT event — batch a burst into one toast/sound/badge
+    // update instead of one of each per row.
+    let pendingRows: { player_name?: string }[] = [];
+    let debounceTimer: ReturnType<typeof setTimeout> | null = null;
+
+    function flush() {
+      const rows = pendingRows;
+      pendingRows = [];
+      debounceTimer = null;
+      if (rows.length === 0) return;
+
+      const uniqueNames = Array.from(
+        new Set(rows.map((r) => r.player_name).filter((n): n is string => !!n))
+      );
+      const message =
+        rows.length === 1
+          ? `New booking from ${rows[0].player_name ?? 'a customer'}`
+          : uniqueNames.length === 1
+          ? `${rows.length} new bookings from ${uniqueNames[0]}`
+          : `${rows.length} new bookings`;
+
+      const toastId = `${Date.now()}-${Math.random()}`;
+      // Stays until the admin dismisses it — no auto-hide timeout.
+      setToasts((prev) => [...prev, { id: toastId, message }]);
+      playNotificationSound();
+
+      // Already looking at the Bookings tab (which live-refetches on
+      // its own) — no need to also badge it as unseen.
+      if (activeTabRef.current !== 'bookings') {
+        setNewBookingsCount((c) => c + rows.length);
+      }
+    }
+
     const channel = supabase
       .channel('admin-new-bookings')
       .on(
         'postgres_changes',
         { event: 'INSERT', schema: 'public', table: 'bookings' },
         (payload) => {
-          const row = payload.new as { player_name?: string };
-          const toastId = `${Date.now()}-${Math.random()}`;
-          // Stays until the admin dismisses it — no auto-hide timeout.
-          setToasts((prev) => [
-            ...prev,
-            { id: toastId, message: `New booking from ${row.player_name ?? 'a customer'}` },
-          ]);
-          playNotificationSound();
-
-          // Already looking at the Bookings tab (which live-refetches on
-          // its own) — no need to also badge it as unseen.
-          if (activeTabRef.current !== 'bookings') {
-            setNewBookingsCount((c) => c + 1);
-          }
+          pendingRows.push(payload.new as { player_name?: string });
+          if (debounceTimer) clearTimeout(debounceTimer);
+          debounceTimer = setTimeout(flush, 800);
         }
       )
       .subscribe();
 
     return () => {
+      if (debounceTimer) clearTimeout(debounceTimer);
       supabase.removeChannel(channel);
     };
   }, [authChecking]);

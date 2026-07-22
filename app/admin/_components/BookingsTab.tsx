@@ -47,7 +47,6 @@ interface TransactionGroup {
   totalPrice: number | null;
   status: BookingStatus | 'mixed';
   receiptUrl: string | null;
-  hasHoldExpired: boolean;
 }
 
 function formatDateTime(iso: string) {
@@ -70,14 +69,6 @@ function formatSlotTimeRange(startIso: string, endIso: string) {
       timeZone: 'Asia/Manila',
     });
   return `${fmt(startIso)} - ${fmt(endIso)}`;
-}
-
-// The slot's calendar date as experienced in the Philippines, not whatever
-// date the raw UTC timestamp happens to fall on (a 6am PHT slot is still
-// the previous day in UTC) — same class of bug fixed for the email
-// notification's displayed time.
-function bookingDatePH(iso: string) {
-  return new Date(iso).toLocaleDateString('en-CA', { timeZone: 'Asia/Manila' });
 }
 
 function toISODateLocal(date: Date) {
@@ -123,6 +114,33 @@ const STATUS_STYLES: Record<BookingStatus | 'mixed', string> = {
   mixed: 'bg-slate-100 text-slate-600',
 };
 
+// Hoisted out of BookingsTab — defining a component inline in a parent's
+// render body gives it a fresh identity every render, which makes React
+// unmount/remount every header cell instead of just updating it.
+function SortHeader({
+  column,
+  sortColumn,
+  sortDirection,
+  onSort,
+  children,
+}: {
+  column: SortColumn;
+  sortColumn: SortColumn | null;
+  sortDirection: 'asc' | 'desc';
+  onSort: (column: SortColumn) => void;
+  children: React.ReactNode;
+}) {
+  const isActive = sortColumn === column;
+  return (
+    <th
+      onClick={() => onSort(column)}
+      className="px-4 sm:px-6 py-3 cursor-pointer select-none hover:text-slate-700 whitespace-nowrap"
+    >
+      {children} {isActive && (sortDirection === 'asc' ? '▲' : '▼')}
+    </th>
+  );
+}
+
 export default function BookingsTab() {
   const [bookings, setBookings] = useState<Booking[]>([]);
   const [loading, setLoading] = useState(true);
@@ -139,7 +157,11 @@ export default function BookingsTab() {
   const [courts, setCourts] = useState<Court[]>([]);
 
   // ---------- Filters ----------
-  const [dateFilterMode, setDateFilterMode] = useState<DateFilterMode>('all');
+  // Defaults to "This month" rather than "All dates" — fetching and
+  // rendering the entire history of the table on every mount (including
+  // every time the admin switches back to this tab) is what caused the
+  // dashboard to freeze once real booking volume built up.
+  const [dateFilterMode, setDateFilterMode] = useState<DateFilterMode>('month');
   const [customDateFrom, setCustomDateFrom] = useState('');
   const [customDateTo, setCustomDateTo] = useState('');
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
@@ -176,30 +198,18 @@ export default function BookingsTab() {
       });
   }, []);
 
+  // Date/status/court are now applied server-side in fetchBookings (see
+  // below) so the fetch itself stays bounded — this only handles the
+  // phone search, which stays client-side since it's live-typing and
+  // shouldn't trigger a network round-trip per keystroke.
   const filteredBookings = useMemo(() => {
-    const range =
-      dateFilterMode === 'custom'
-        ? { from: customDateFrom, to: customDateTo }
-        : getPresetRange(dateFilterMode);
     const phoneQuery = phoneSearch.trim().toLowerCase();
-
-    return bookings.filter((b) => {
-      if (statusFilter !== 'all' && b.status !== statusFilter) return false;
-      if (courtFilter !== 'all' && b.court_id !== courtFilter) return false;
-      if (phoneQuery && !b.player_phone.toLowerCase().includes(phoneQuery)) return false;
-
-      if (range.from || range.to) {
-        const bookingDate = bookingDatePH(b.start_time);
-        if (range.from && bookingDate < range.from) return false;
-        if (range.to && bookingDate > range.to) return false;
-      }
-
-      return true;
-    });
-  }, [bookings, dateFilterMode, customDateFrom, customDateTo, statusFilter, courtFilter, phoneSearch]);
+    if (!phoneQuery) return bookings;
+    return bookings.filter((b) => b.player_phone.toLowerCase().includes(phoneQuery));
+  }, [bookings, phoneSearch]);
 
   function clearFilters() {
-    setDateFilterMode('all');
+    setDateFilterMode('month');
     setCustomDateFrom('');
     setCustomDateTo('');
     setStatusFilter('all');
@@ -208,7 +218,7 @@ export default function BookingsTab() {
   }
 
   const filtersActive =
-    dateFilterMode !== 'all' || statusFilter !== 'all' || courtFilter !== 'all' || phoneSearch.trim() !== '';
+    dateFilterMode !== 'month' || statusFilter !== 'all' || courtFilter !== 'all' || phoneSearch.trim() !== '';
 
   // Keeps the "hold expired" indicator live without needing a manual refresh.
   useEffect(() => {
@@ -226,15 +236,40 @@ export default function BookingsTab() {
   }
 
   const fetchBookings = useCallback(async () => {
-    setLoading(true);
     setError(null);
 
-    const { data, error } = await supabase
+    const range =
+      dateFilterMode === 'custom'
+        ? { from: customDateFrom, to: customDateTo }
+        : getPresetRange(dateFilterMode);
+
+    // Custom range selected but not fully filled in yet — don't run an
+    // unbounded query in the meantime.
+    if (dateFilterMode === 'custom' && (!range.from || !range.to)) {
+      setBookings([]);
+      setLoading(false);
+      return;
+    }
+
+    setLoading(true);
+
+    let query = supabase
       .from('bookings')
       .select(
         'id, court_id, transaction_id, player_name, player_phone, player_email, start_time, end_time, status, receipt_url, created_at, price, courts(name)'
       )
       .order('id', { ascending: false });
+
+    // Bounding this server-side (rather than fetching every booking ever
+    // made and filtering client-side) keeps the fetch — and the grouping/
+    // sorting/rendering that follows — proportional to the selected range
+    // instead of the whole table's history.
+    if (range.from) query = query.gte('start_time', `${range.from}T00:00:00+08:00`);
+    if (range.to) query = query.lte('start_time', `${range.to}T23:59:59+08:00`);
+    if (statusFilter !== 'all') query = query.eq('status', statusFilter);
+    if (courtFilter !== 'all') query = query.eq('court_id', courtFilter);
+
+    const { data, error } = await query;
 
     if (error) {
       console.error('Failed to load bookings:', error);
@@ -245,7 +280,7 @@ export default function BookingsTab() {
 
     setBookings((data ?? []) as unknown as Booking[]);
     setLoading(false);
-  }, []);
+  }, [dateFilterMode, customDateFrom, customDateTo, statusFilter, courtFilter]);
 
   useEffect(() => {
     fetchBookings();
@@ -256,16 +291,25 @@ export default function BookingsTab() {
   // and this component doesn't. Refetch when the admin returns to this tab
   // after being away, so it stays in sync with whatever came in meanwhile.
   useEffect(() => {
+    // A single multi-slot booking inserts one row per hour, each firing
+    // its own INSERT event — debounce so a burst of N events triggers one
+    // refetch instead of N full reloads landing back to back.
+    let debounceTimer: ReturnType<typeof setTimeout> | null = null;
+
     const channel = supabase
       .channel('bookings-tab-refetch')
       .on(
         'postgres_changes',
         { event: 'INSERT', schema: 'public', table: 'bookings' },
-        () => fetchBookings()
+        () => {
+          if (debounceTimer) clearTimeout(debounceTimer);
+          debounceTimer = setTimeout(() => fetchBookings(), 800);
+        }
       )
       .subscribe();
 
     return () => {
+      if (debounceTimer) clearTimeout(debounceTimer);
       supabase.removeChannel(channel);
     };
   }, [fetchBookings]);
@@ -319,12 +363,15 @@ export default function BookingsTab() {
         totalPrice,
         status,
         receiptUrl: first.receipt_url,
-        hasHoldExpired: sorted.some((b) => isHoldExpired(b)),
       });
     }
     return groups;
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [filteredBookings, now, settings.pending_hold_minutes]);
+    // "Hold expired" is intentionally computed at render time (per row,
+    // via isHoldExpired) rather than baked in here — this grouping/sorting
+    // pass is the expensive part, and it shouldn't re-run every 30s just
+    // because the live clock ticked. Only `now`-dependent display needs
+    // to react to the tick, not the whole regroup.
+  }, [filteredBookings]);
 
   function handleSort(column: SortColumn) {
     if (sortColumn === column) {
@@ -371,18 +418,6 @@ export default function BookingsTab() {
   }, [transactionGroups, sortColumn, sortDirection]);
 
   const detailsGroup = sortedGroups.find((g) => g.key === detailsKey) ?? null;
-
-  function SortHeader({ column, children }: { column: SortColumn; children: React.ReactNode }) {
-    const isActive = sortColumn === column;
-    return (
-      <th
-        onClick={() => handleSort(column)}
-        className="px-4 sm:px-6 py-3 cursor-pointer select-none hover:text-slate-700 whitespace-nowrap"
-      >
-        {children} {isActive && (sortDirection === 'asc' ? '▲' : '▼')}
-      </th>
-    );
-  }
 
   async function updateStatus(bookingId: string, status: BookingStatus): Promise<boolean> {
     setUpdatingId(bookingId);
@@ -703,14 +738,16 @@ export default function BookingsTab() {
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b border-slate-200 text-left text-xs font-medium text-slate-500 uppercase tracking-wide">
-                  <SortHeader column="player">Player</SortHeader>
-                  <SortHeader column="phone">Phone</SortHeader>
-                  <SortHeader column="transaction">Transaction #</SortHeader>
-                  <SortHeader column="date">Date &amp; Time</SortHeader>
-                  <SortHeader column="court">Court</SortHeader>
-                  <SortHeader column="hours">Total Hours</SortHeader>
-                  {settings.show_price && <SortHeader column="price">Price</SortHeader>}
-                  <SortHeader column="status">Status</SortHeader>
+                  <SortHeader column="player" sortColumn={sortColumn} sortDirection={sortDirection} onSort={handleSort}>Player</SortHeader>
+                  <SortHeader column="phone" sortColumn={sortColumn} sortDirection={sortDirection} onSort={handleSort}>Phone</SortHeader>
+                  <SortHeader column="transaction" sortColumn={sortColumn} sortDirection={sortDirection} onSort={handleSort}>Transaction #</SortHeader>
+                  <SortHeader column="date" sortColumn={sortColumn} sortDirection={sortDirection} onSort={handleSort}>Date &amp; Time</SortHeader>
+                  <SortHeader column="court" sortColumn={sortColumn} sortDirection={sortDirection} onSort={handleSort}>Court</SortHeader>
+                  <SortHeader column="hours" sortColumn={sortColumn} sortDirection={sortDirection} onSort={handleSort}>Total Hours</SortHeader>
+                  {settings.show_price && (
+                    <SortHeader column="price" sortColumn={sortColumn} sortDirection={sortDirection} onSort={handleSort}>Price</SortHeader>
+                  )}
+                  <SortHeader column="status" sortColumn={sortColumn} sortDirection={sortDirection} onSort={handleSort}>Status</SortHeader>
                   <th className="px-4 sm:px-6 py-3">Details</th>
                   <th className="px-4 sm:px-6 py-3">Actions</th>
                 </tr>
@@ -718,6 +755,7 @@ export default function BookingsTab() {
               <tbody>
                 {sortedGroups.map((group) => {
                   const isBulkUpdating = bulkUpdatingKey === group.key;
+                  const hasHoldExpired = group.bookings.some(isHoldExpired);
                   return (
                     <tr
                       key={group.key}
@@ -756,7 +794,7 @@ export default function BookingsTab() {
                         >
                           {group.status}
                         </span>
-                        {group.hasHoldExpired && (
+                        {hasHoldExpired && (
                           <span
                             className="block text-[11px] text-amber-600 mt-1"
                             title="One or more slots may already be booked by someone else."
@@ -993,6 +1031,7 @@ export default function BookingsTab() {
                   selectedDate={rescheduleDate}
                   minDate={todayISODate()}
                   onSelect={setRescheduleDate}
+                  accentColor="var(--admin-btn-bg)"
                   isDateDisabled={isDateClosed}
                 />
               </div>

@@ -194,10 +194,17 @@ export default function ReportAvailableSlots() {
                 <button
                   key={court.id}
                   onClick={() => setSelectedCourtId(court.id)}
-                  className={`flex-1 rounded-xl border px-4 py-2.5 text-sm font-medium transition-colors ${
+                  style={
                     isSelected
-                      ? 'bg-emerald-600 border-emerald-600 text-white'
-                      : 'bg-white border-slate-300 text-slate-700 hover:border-emerald-400'
+                      ? {
+                          backgroundColor: 'var(--admin-btn-bg)',
+                          borderColor: 'var(--admin-btn-bg)',
+                          color: 'var(--admin-btn-label)',
+                        }
+                      : undefined
+                  }
+                  className={`flex-1 rounded-xl border px-4 py-2.5 text-sm font-medium transition-colors ${
+                    isSelected ? '' : 'bg-white border-slate-300 text-slate-700 hover:border-emerald-400'
                   }`}
                 >
                   {court.name}
@@ -213,6 +220,7 @@ export default function ReportAvailableSlots() {
             selectedDate={selectedDate}
             minDate={todayISODate()}
             onSelect={setSelectedDate}
+            accentColor="var(--admin-btn-bg)"
             isDateDisabled={isDateClosed}
           />
         </div>

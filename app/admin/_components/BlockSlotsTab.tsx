@@ -300,6 +300,7 @@ export default function BlockSlotsTab() {
                 selectedDate={blockDateFrom}
                 minDate={todayISODate()}
                 onSelect={handleSelectFromDate}
+                accentColor="var(--admin-btn-bg)"
                 isDateDisabled={isDateClosed}
               />
             </div>
@@ -309,6 +310,7 @@ export default function BlockSlotsTab() {
                 selectedDate={blockDateTo}
                 minDate={blockDateFrom}
                 onSelect={setBlockDateTo}
+                accentColor="var(--admin-btn-bg)"
                 isDateDisabled={isDateClosed}
               />
             </div>

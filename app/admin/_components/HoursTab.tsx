@@ -239,10 +239,17 @@ export default function HoursTab() {
                       key={day.value}
                       type="button"
                       onClick={() => toggleDay(day.value)}
-                      className={`rounded-full border px-4 py-1.5 text-sm font-medium transition-colors ${
+                      style={
                         isOpen
-                          ? 'bg-emerald-600 border-emerald-600 text-white'
-                          : 'bg-white border-slate-300 text-slate-500 hover:border-slate-400'
+                          ? {
+                              backgroundColor: 'var(--admin-btn-bg)',
+                              borderColor: 'var(--admin-btn-bg)',
+                              color: 'var(--admin-btn-label)',
+                            }
+                          : undefined
+                      }
+                      className={`rounded-full border px-4 py-1.5 text-sm font-medium transition-colors ${
+                        isOpen ? '' : 'bg-white border-slate-300 text-slate-500 hover:border-slate-400'
                       }`}
                     >
                       {day.label}

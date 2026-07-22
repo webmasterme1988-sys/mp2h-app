@@ -420,9 +420,18 @@ export default function PricingTab() {
                     <button
                       type="button"
                       onClick={() => setPricingMode('flat')}
+                      style={
+                        pricingMode === 'flat'
+                          ? {
+                              backgroundColor: 'var(--admin-btn-bg)',
+                              borderColor: 'var(--admin-btn-bg)',
+                              color: 'var(--admin-btn-label)',
+                            }
+                          : undefined
+                      }
                       className={`rounded-xl border px-4 py-2 text-sm font-medium transition-colors ${
                         pricingMode === 'flat'
-                          ? 'bg-emerald-600 border-emerald-600 text-white'
+                          ? ''
                           : 'bg-white border-slate-300 text-slate-600 hover:border-emerald-400'
                       }`}
                     >
@@ -431,9 +440,18 @@ export default function PricingTab() {
                     <button
                       type="button"
                       onClick={() => setPricingMode('tiered')}
+                      style={
+                        pricingMode === 'tiered'
+                          ? {
+                              backgroundColor: 'var(--admin-btn-bg)',
+                              borderColor: 'var(--admin-btn-bg)',
+                              color: 'var(--admin-btn-label)',
+                            }
+                          : undefined
+                      }
                       className={`rounded-xl border px-4 py-2 text-sm font-medium transition-colors ${
                         pricingMode === 'tiered'
-                          ? 'bg-emerald-600 border-emerald-600 text-white'
+                          ? ''
                           : 'bg-white border-slate-300 text-slate-600 hover:border-emerald-400'
                       }`}
                     >

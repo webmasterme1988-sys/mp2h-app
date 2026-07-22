@@ -1,4 +1,5 @@
 import { formatPrice } from './priceTiers';
+import { normalizeRichText } from './richText';
 
 export interface CustomerEmailSlot {
   timeRange: string; // e.g. "4:00 PM to 5:00 PM"
@@ -62,10 +63,14 @@ export function buildCustomerConfirmationEmail(
     slots,
     totalHours,
     totalPrice,
-    footerHtml,
     address,
     directionsUrl,
   } = params;
+
+  // Guards against contentEditable's empty-but-truthy artifacts (e.g. a
+  // bare "<br>" left behind after an admin deletes all the visible text),
+  // which would otherwise still print an empty footer/divider.
+  const footerHtml = params.footerHtml ? normalizeRichText(params.footerHtml) : null;
 
   // ---------- Plain text (fallback for clients that don't render HTML) ----------
 

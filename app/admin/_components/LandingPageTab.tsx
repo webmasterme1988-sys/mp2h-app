@@ -5,6 +5,7 @@ import { supabase } from '@/lib/supabase';
 import { fetchSiteSettings } from '@/lib/siteSettings';
 import { fetchLandingPhotos, MAX_LANDING_PHOTOS, type LandingPhoto } from '@/lib/landingPhotos';
 import { uploadBrandingImage, brandingPathFromPublicUrl } from '@/lib/brandingStorage';
+import { normalizeRichText } from '@/lib/richText';
 import RichTextEditor from './RichTextEditor';
 
 export default function LandingPageTab() {
@@ -60,8 +61,8 @@ export default function LandingPageTab() {
     const { error: upsertError } = await supabase.from('site_settings').upsert({
       id: 1,
       landing_tagline: tagline.trim() || null,
-      landing_about_html: aboutHtml.trim() || null,
-      landing_policy_html: policyHtml.trim() || null,
+      landing_about_html: normalizeRichText(aboutHtml),
+      landing_policy_html: normalizeRichText(policyHtml),
       landing_address: address.trim() || null,
       landing_contact_phone: contactPhone.trim() || null,
       landing_contact_email: contactEmail.trim() || null,

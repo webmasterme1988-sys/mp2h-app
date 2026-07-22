@@ -4,6 +4,7 @@ import { fetchSiteSettings } from '@/lib/siteSettings';
 import { fetchLandingPhotos } from '@/lib/landingPhotos';
 import { formatHourLabel } from '@/lib/timeSlots';
 import { getDirectionsUrl } from '@/lib/googleMaps';
+import { normalizeRichText } from '@/lib/richText';
 import GalleryLightbox from '@/components/GalleryLightbox';
 import {
   FacebookIcon,
@@ -42,6 +43,16 @@ export default async function LandingPage() {
 
   const courts = (courtsResult.data ?? []) as Court[];
   const tagline = settings.landing_tagline || settings.site_subtitle;
+  // Guards against contentEditable's empty-but-truthy artifacts (e.g. a
+  // bare "<br>" left behind after an admin deletes all the visible text),
+  // which would otherwise make an intentionally-cleared section still
+  // render as a heading with nothing under it.
+  const aboutHtml = settings.landing_about_html
+    ? normalizeRichText(settings.landing_about_html)
+    : null;
+  const policyHtml = settings.landing_policy_html
+    ? normalizeRichText(settings.landing_policy_html)
+    : null;
   const whatsappUrl = settings.landing_whatsapp_number
     ? `https://wa.me/${settings.landing_whatsapp_number.replace(/\D/g, '')}`
     : null;
@@ -121,12 +132,12 @@ export default async function LandingPage() {
       </section>
 
       {/* About */}
-      {settings.landing_about_html && (
+      {aboutHtml && (
         <section className="max-w-3xl mx-auto px-4 py-16">
           <h2 className="font-display text-3xl text-mp2h-navy mb-4 tracking-wide">About Us</h2>
           <div
             className="rich-content text-slate-700 leading-relaxed"
-            dangerouslySetInnerHTML={{ __html: settings.landing_about_html }}
+            dangerouslySetInnerHTML={{ __html: aboutHtml }}
           />
         </section>
       )}
@@ -217,14 +228,14 @@ export default async function LandingPage() {
       )}
 
       {/* Policy */}
-      {settings.landing_policy_html && (
+      {policyHtml && (
         <section className="max-w-3xl mx-auto px-4 py-16">
           <h2 className="font-display text-3xl text-mp2h-navy mb-4 tracking-wide">
             Booking &amp; Reservation Policy
           </h2>
           <div
             className="rich-content text-slate-700 leading-relaxed"
-            dangerouslySetInnerHTML={{ __html: settings.landing_policy_html }}
+            dangerouslySetInnerHTML={{ __html: policyHtml }}
           />
         </section>
       )}

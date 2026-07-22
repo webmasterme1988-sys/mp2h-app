@@ -6,6 +6,7 @@ import { fetchSiteSettings, DEFAULT_SITE_SETTINGS, type SiteSettings } from '@/l
 import { fetchPriceTiers, type PriceTier, type PricingMode } from '@/lib/priceTiers';
 import { formatHourLabel } from '@/lib/timeSlots';
 import { uploadBrandingImage } from '@/lib/brandingStorage';
+import { normalizeRichText } from '@/lib/richText';
 import RichTextEditor from './RichTextEditor';
 
 const HOUR_OPTIONS = Array.from({ length: 25 }, (_, i) => i);
@@ -128,7 +129,7 @@ export default function PricingTab() {
       flat_price: flatPrice,
       attach_marketing_image: attachMarketingImage,
       marketing_image_url: marketingImageUrl,
-      customer_email_footer_html: emailFooterHtml.trim() || null,
+      customer_email_footer_html: normalizeRichText(emailFooterHtml),
       attach_receipt_to_customer_email: attachReceiptToCustomerEmail,
     });
 

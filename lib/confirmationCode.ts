@@ -22,10 +22,10 @@ function toHex6(n: number): string {
 const CONFIRMATION_SCRAMBLE = 2654435761;
 const REFERENCE_SCRAMBLE = 40503;
 
-/** e.g. "CONF-20260702-70F623" — bookingDateISO is the court date, "YYYY-MM-DD". */
+/** e.g. "MP2H-20260702-70F623" — bookingDateISO is the court date, "YYYY-MM-DD". */
 export function formatConfirmationNumber(transactionId: number, bookingDateISO: string): string {
   const compactDate = bookingDateISO.replace(/-/g, '');
-  return `CONF-${compactDate}-${toHex6(transactionId * CONFIRMATION_SCRAMBLE)}`;
+  return `MP2H-${compactDate}-${toHex6(transactionId * CONFIRMATION_SCRAMBLE)}`;
 }
 
 /** e.g. "REF-41540E" */

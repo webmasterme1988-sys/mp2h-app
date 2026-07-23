@@ -109,6 +109,9 @@ export async function POST(request: NextRequest) {
     dateStyle: 'medium',
     timeZone: 'Asia/Manila',
   });
+  const bookingDateISO = new Date(booking.start_time).toLocaleDateString('en-CA', {
+    timeZone: 'Asia/Manila',
+  });
   // "9:00 AM to 10:00 AM" — the actual booked slot, not just its start time.
   const formatTime = (iso: string) =>
     new Date(iso).toLocaleTimeString('en-US', {
@@ -135,6 +138,7 @@ export async function POST(request: NextRequest) {
     transactionId: booking.transaction_id,
     courtName,
     dateLabel,
+    bookingDateISO,
     slots: [{ timeRange, price: booking.price }],
     totalHours: 1,
     totalPrice: booking.price,

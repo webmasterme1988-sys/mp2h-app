@@ -10,6 +10,8 @@ import { type Holiday } from '@/lib/holidays';
 import { compressImage } from '@/lib/compressImage';
 import { getSlotPrice, formatPrice, type PriceTier } from '@/lib/priceTiers';
 import { fetchActiveAddons, type Addon } from '@/lib/addons';
+import { formatConfirmationNumber, formatReferenceNumber } from '@/lib/confirmationCode';
+import CopyableCode from '@/components/CopyableCode';
 
 // ---------- Types ----------
 
@@ -945,13 +947,22 @@ export default function BookingPageClient({
                     </p>
                   </div>
 
+                  {lastTransactionId !== null && (
+                    <div className="rounded-xl bg-slate-50 border border-slate-200 p-4 text-sm space-y-2 mb-3">
+                      <CopyableCode
+                        icon="ticket"
+                        label="Confirmation #"
+                        value={formatConfirmationNumber(lastTransactionId, selectedDate)}
+                      />
+                      <CopyableCode
+                        icon="hash"
+                        label="Reference #"
+                        value={formatReferenceNumber(lastTransactionId)}
+                      />
+                    </div>
+                  )}
+
                   <div className="rounded-xl border border-slate-200 p-4 text-sm space-y-2">
-                    {lastTransactionId !== null && (
-                      <div className="flex justify-between text-slate-500">
-                        <span>Confirmation Number</span>
-                        <span className="font-medium text-slate-700">#{lastTransactionId}</span>
-                      </div>
-                    )}
                     <div className="flex justify-between text-slate-500">
                       <span>Court</span>
                       <span className="font-medium text-slate-700">

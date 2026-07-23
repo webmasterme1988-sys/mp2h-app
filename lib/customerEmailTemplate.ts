@@ -1,5 +1,6 @@
 import { formatPrice } from './priceTiers';
 import { normalizeRichText } from './richText';
+import { formatConfirmationNumber, formatReferenceNumber } from './confirmationCode';
 
 export interface CustomerEmailSlot {
   timeRange: string; // e.g. "4:00 PM to 5:00 PM"
@@ -12,6 +13,7 @@ export interface CustomerEmailParams {
   transactionId: number | null;
   courtName: string;
   dateLabel: string; // e.g. "Jul 22, 2026"
+  bookingDateISO: string; // "YYYY-MM-DD", Philippine time — used to build Confirmation #
   slots: CustomerEmailSlot[];
   totalHours: number;
   totalPrice: number | null; // null = don't show a total line at all
@@ -60,6 +62,7 @@ export function buildCustomerConfirmationEmail(
     transactionId,
     courtName,
     dateLabel,
+    bookingDateISO,
     slots,
     totalHours,
     totalPrice,
@@ -72,13 +75,18 @@ export function buildCustomerConfirmationEmail(
   // which would otherwise still print an empty footer/divider.
   const footerHtml = params.footerHtml ? normalizeRichText(params.footerHtml) : null;
 
+  const confirmationNumber =
+    transactionId !== null ? formatConfirmationNumber(transactionId, bookingDateISO) : null;
+  const referenceNumber = transactionId !== null ? formatReferenceNumber(transactionId) : null;
+
   // ---------- Plain text (fallback for clients that don't render HTML) ----------
 
   const textLines: (string | null)[] = [
     `Hi ${playerName},`,
     '',
     'Your booking is confirmed!',
-    transactionId !== null ? `Confirmation Number: #${transactionId}` : null,
+    confirmationNumber ? `Confirmation #: ${confirmationNumber}` : null,
+    referenceNumber ? `Reference #: ${referenceNumber}` : null,
     '',
     `Contact Number: ${playerPhone}`,
     '',
@@ -118,10 +126,8 @@ export function buildCustomerConfirmationEmail(
   <p style="margin: 0 0 16px;">Hi <strong>${escapeHtml(playerName)}</strong>,</p>
   <p style="margin: 0 0 16px;">
     Your booking is confirmed!${
-      transactionId !== null
-        ? `<br><strong>Confirmation Number: #${transactionId}</strong>`
-        : ''
-    }
+      confirmationNumber ? `<br><strong>Confirmation #: ${confirmationNumber}</strong>` : ''
+    }${referenceNumber ? `<br><strong>Reference #: ${referenceNumber}</strong>` : ''}
   </p>
   <p style="margin: 0 0 16px;"><strong>Contact Number: ${escapeHtml(playerPhone)}</strong></p>
   <p style="margin: 0 0 16px;">

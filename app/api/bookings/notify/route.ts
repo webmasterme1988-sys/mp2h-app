@@ -168,6 +168,9 @@ export async function POST(request: NextRequest) {
         transactionId: first.transaction_id,
         courtName,
         dateLabel: formatDate(first.start_time),
+        bookingDateISO: new Date(first.start_time).toLocaleDateString('en-CA', {
+          timeZone: 'Asia/Manila',
+        }),
         slots: bookings.map((b) => ({
           timeRange: formatSlotRange(b.start_time, b.end_time),
           price: b.price,

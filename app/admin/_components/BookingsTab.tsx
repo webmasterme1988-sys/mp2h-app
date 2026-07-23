@@ -7,6 +7,8 @@ import { buildTimeSlots, todayISODate } from '@/lib/timeSlots';
 import { fetchSiteSettings, DEFAULT_SITE_SETTINGS, type SiteSettings } from '@/lib/siteSettings';
 import { fetchHolidays, type Holiday } from '@/lib/holidays';
 import { fetchPriceTiers, getSlotPrice, formatPrice, type PriceTier } from '@/lib/priceTiers';
+import { formatConfirmationNumber, formatReferenceNumber } from '@/lib/confirmationCode';
+import CopyableCode from '@/components/CopyableCode';
 
 type BookingStatus = 'pending' | 'confirmed' | 'cancelled';
 type DateFilterMode = 'all' | 'today' | 'week' | 'month' | 'custom';
@@ -61,6 +63,12 @@ function formatDateTime(iso: string) {
     hour: 'numeric',
     minute: '2-digit',
   });
+}
+
+// Confirmation # is stamped with the court date (Philippine time), not the
+// date the booking was submitted — 'en-CA' formats as YYYY-MM-DD directly.
+function playDateISO(startIso: string) {
+  return new Date(startIso).toLocaleDateString('en-CA', { timeZone: 'Asia/Manila' });
 }
 
 // "6:00 AM - 7:00 AM" for a single booked slot — pinned to Philippine time
@@ -858,8 +866,13 @@ export default function BookingsTab() {
                           <div className="text-xs text-slate-400">{group.playerEmail}</div>
                         )}
                       </td>
-                      <td className="px-4 sm:px-6 py-3 text-slate-600 whitespace-nowrap">
-                        {group.transactionId !== null ? `#${group.transactionId}` : '—'}
+                      <td className="px-4 sm:px-6 py-3 text-slate-600 whitespace-nowrap font-mono text-xs">
+                        {group.transactionId !== null
+                          ? formatConfirmationNumber(
+                              group.transactionId,
+                              playDateISO(group.bookings[0].start_time)
+                            )
+                          : '—'}
                       </td>
                       <td className="px-4 sm:px-6 py-3 text-slate-600 whitespace-nowrap">
                         {formatDateTime(group.createdAt)}
@@ -1024,9 +1037,7 @@ export default function BookingsTab() {
           >
             <div className="sticky top-0 bg-white border-b border-slate-200 px-5 py-4 flex items-center justify-between">
               <div>
-                <h3 className="font-semibold text-slate-800">
-                  Confirmation {detailsGroup.transactionId !== null ? `#${detailsGroup.transactionId}` : ''}
-                </h3>
+                <h3 className="font-semibold text-slate-800">Booking Details</h3>
                 <p className="text-xs text-slate-500 mt-0.5">
                   {detailsGroup.playerName} · {detailsGroup.courtName} ·{' '}
                   {formatDateTime(detailsGroup.createdAt)}
@@ -1042,6 +1053,24 @@ export default function BookingsTab() {
             </div>
 
             <div className="p-5 space-y-4">
+              {detailsGroup.transactionId !== null && (
+                <div className="rounded-xl bg-slate-50 border border-slate-200 px-3 py-2.5 space-y-2">
+                  <CopyableCode
+                    icon="ticket"
+                    label="Confirmation #"
+                    value={formatConfirmationNumber(
+                      detailsGroup.transactionId,
+                      playDateISO(detailsGroup.bookings[0].start_time)
+                    )}
+                  />
+                  <CopyableCode
+                    icon="hash"
+                    label="Reference #"
+                    value={formatReferenceNumber(detailsGroup.transactionId)}
+                  />
+                </div>
+              )}
+
               <div className="flex items-center justify-between text-sm">
                 <span className="text-slate-600">
                   {detailsGroup.totalHours} hour{detailsGroup.totalHours !== 1 ? 's' : ''} booked

@@ -31,23 +31,6 @@ function formatDateTime(iso: string) {
   });
 }
 
-// Deliberately does all arithmetic in UTC, never touching the local
-// timezone: constructing a Date from a bare "YYYY-MM-DDT00:00:00" string
-// parses it as LOCAL midnight, and in any timezone ahead of UTC (e.g. the
-// Philippines, UTC+8) that local midnight is still the previous UTC day —
-// so a naive setDate()+toISOString() round-trip can return the *same*
-// date it was given instead of the next one, which silently turns the
-// targetDates loop below into an infinite loop and freezes the tab.
-function addDays(iso: string, days: number) {
-  const [year, month, day] = iso.split('-').map(Number);
-  const d = new Date(Date.UTC(year, month - 1, day + days));
-  return `${d.getUTCFullYear()}-${String(d.getUTCMonth() + 1).padStart(2, '0')}-${String(d.getUTCDate()).padStart(2, '0')}`;
-}
-
-// Blocking a wide range one day at a time would mean a lot of rows and a
-// long-running form submit — cap it to something reasonable.
-const MAX_RANGE_DAYS = 62;
-
 export default function BlockSlotsTab() {
   const [courts, setCourts] = useState<Court[]>([]);
   const [settings, setSettings] = useState<SiteSettings>(DEFAULT_SITE_SETTINGS);
@@ -57,9 +40,8 @@ export default function BlockSlotsTab() {
   const [blockedSlotsLoading, setBlockedSlotsLoading] = useState(true);
   const [blockedSlotsError, setBlockedSlotsError] = useState<string | null>(null);
   const [blockCourtId, setBlockCourtId] = useState<string | null>(null);
-  const [blockDateFrom, setBlockDateFrom] = useState<string>(todayISODate());
-  const [blockDateTo, setBlockDateTo] = useState<string>(todayISODate());
-  const [blockHour, setBlockHour] = useState<number | null>(null);
+  const [blockDate, setBlockDate] = useState<string>(todayISODate());
+  const [selectedHours, setSelectedHours] = useState<number[]>([]);
   const [blockReason, setBlockReason] = useState('');
   const [addingBlock, setAddingBlock] = useState(false);
   const [blockInfo, setBlockInfo] = useState<string | null>(null);
@@ -97,15 +79,6 @@ export default function BlockSlotsTab() {
     fetchHolidays(supabase).then(setHolidays);
   }, []);
 
-  // Default the time-slot picker to the first slot once hours load (or
-  // reset it if the configured hours change and shrink the slot list).
-  useEffect(() => {
-    if (timeSlots.length === 0) return;
-    if (blockHour === null || !timeSlots.some((s) => s.hour === blockHour)) {
-      setBlockHour(timeSlots[0].hour);
-    }
-  }, [timeSlots, blockHour]);
-
   const fetchBlockedSlots = useCallback(async () => {
     setBlockedSlotsLoading(true);
     setBlockedSlotsError(null);
@@ -137,50 +110,38 @@ export default function BlockSlotsTab() {
     }
   }, [courts, blockCourtId]);
 
-  // Dates in the selected range that are actually open — closed days are
-  // silently skipped rather than erroring, since blocking a day that's
-  // already closed has no effect either way.
-  const targetDates = useMemo(() => {
-    if (blockDateTo < blockDateFrom) return [];
-    const dates: string[] = [];
-    for (let d = blockDateFrom; d <= blockDateTo; d = addDays(d, 1)) {
-      if (!isDateClosed(d)) dates.push(d);
-    }
-    return dates;
-  }, [blockDateFrom, blockDateTo, isDateClosed]);
+  // A fresh pick of court/date shouldn't carry over an hour selection that
+  // was only meaningful for the previous one.
+  useEffect(() => {
+    setSelectedHours([]);
+  }, [blockCourtId, blockDate]);
 
-  function handleSelectFromDate(iso: string) {
-    setBlockDateFrom(iso);
-    if (blockDateTo < iso) setBlockDateTo(iso);
+  // Which of this court's slots on this date are already blocked — greyed
+  // out below rather than offered again, since re-blocking one is a no-op.
+  const alreadyBlockedTimes = useMemo(() => {
+    return new Set(
+      blockedSlots
+        .filter((b) => b.court_id === blockCourtId)
+        .map((b) => new Date(b.start_time).getTime())
+    );
+  }, [blockedSlots, blockCourtId]);
+
+  function isSlotAlreadyBlocked(hour: number) {
+    const slot = timeSlots.find((s) => s.hour === hour);
+    if (!slot) return false;
+    return alreadyBlockedTimes.has(new Date(slot.startISO(blockDate)).getTime());
+  }
+
+  function toggleHour(hour: number) {
+    if (isSlotAlreadyBlocked(hour)) return;
+    setSelectedHours((prev) =>
+      prev.includes(hour) ? prev.filter((h) => h !== hour) : [...prev, hour].sort((a, b) => a - b)
+    );
   }
 
   async function handleAddBlock(e: React.FormEvent) {
     e.preventDefault();
-    if (!blockCourtId) return;
-
-    const slot = timeSlots.find((s) => s.hour === blockHour);
-    if (!slot) return;
-
-    if (blockDateTo < blockDateFrom) {
-      setBlockedSlotsError('The "to" date must be on or after the "from" date.');
-      return;
-    }
-
-    const spanDays =
-      Math.round(
-        (new Date(`${blockDateTo}T00:00:00`).getTime() -
-          new Date(`${blockDateFrom}T00:00:00`).getTime()) /
-          86400000
-      ) + 1;
-    if (spanDays > MAX_RANGE_DAYS) {
-      setBlockedSlotsError(`Please pick a range of ${MAX_RANGE_DAYS} days or fewer.`);
-      return;
-    }
-
-    if (targetDates.length === 0) {
-      setBlockedSlotsError('Every date in that range is already closed — nothing to block.');
-      return;
-    }
+    if (!blockCourtId || selectedHours.length === 0) return;
 
     setAddingBlock(true);
     setBlockedSlotsError(null);
@@ -190,14 +151,17 @@ export default function BlockSlotsTab() {
     let alreadyBlockedCount = 0;
     let failedCount = 0;
 
-    // One insert per date rather than a single bulk insert, so a date
+    // One insert per slot rather than a single bulk insert, so a slot
     // that's already blocked (or any other single failure) doesn't stop
-    // the rest of the range from going through.
-    for (const date of targetDates) {
+    // the rest of the selection from going through.
+    for (const hour of selectedHours) {
+      const slot = timeSlots.find((s) => s.hour === hour);
+      if (!slot) continue;
+
       const { error } = await supabase.from('blocked_slots').insert({
         court_id: blockCourtId,
-        start_time: slot.startISO(date),
-        end_time: slot.endISO(date),
+        start_time: slot.startISO(blockDate),
+        end_time: slot.endISO(blockDate),
         reason: blockReason.trim() || null,
       });
 
@@ -205,7 +169,7 @@ export default function BlockSlotsTab() {
         if (error.code === '23505') {
           alreadyBlockedCount++;
         } else {
-          console.error(`Failed to block slot on ${date}:`, error);
+          console.error(`Failed to block ${slot.label} on ${blockDate}:`, error);
           failedCount++;
         }
       } else {
@@ -217,17 +181,18 @@ export default function BlockSlotsTab() {
 
     if (failedCount > 0) {
       setBlockedSlotsError(
-        `Blocked ${blockedCount} date${blockedCount === 1 ? '' : 's'}, but ${failedCount} failed. Please try again for the remaining date(s).`
+        `Blocked ${blockedCount} slot${blockedCount === 1 ? '' : 's'}, but ${failedCount} failed. Please try again for the remaining slot(s).`
       );
     } else {
       setBlockInfo(
         alreadyBlockedCount > 0
-          ? `Blocked ${blockedCount} new date${blockedCount === 1 ? '' : 's'} (${alreadyBlockedCount} were already blocked).`
-          : `Blocked ${blockedCount} date${blockedCount === 1 ? '' : 's'}.`
+          ? `Blocked ${blockedCount} new slot${blockedCount === 1 ? '' : 's'} (${alreadyBlockedCount} were already blocked).`
+          : `Blocked ${blockedCount} slot${blockedCount === 1 ? '' : 's'}.`
       );
     }
 
     setBlockReason('');
+    setSelectedHours([]);
     await fetchBlockedSlots();
   }
 
@@ -253,75 +218,106 @@ export default function BlockSlotsTab() {
       <h2 className="text-lg font-semibold text-slate-800 mb-4">Block Time Slots</h2>
       <p className="text-sm text-slate-500 mb-4">
         Blocked slots stop showing as bookable on the public booking page (e.g. for maintenance
-        or private events).
+        or private events). To close a whole day, use Hours &amp; Holidays instead.
       </p>
 
       {blockedSlotsError && <p className="text-sm text-red-600 mb-3">{blockedSlotsError}</p>}
       {blockInfo && <p className="text-sm text-emerald-600 mb-3">{blockInfo}</p>}
 
-      <form onSubmit={handleAddBlock} className="space-y-3 mb-5">
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-          <div>
-            <label className="block text-sm font-medium text-slate-600 mb-1">Court</label>
-            <select
-              value={blockCourtId ?? ''}
-              onChange={(e) => setBlockCourtId(e.target.value)}
-              className="w-full rounded-xl border border-slate-300 px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
-            >
-              {courts.length === 0 && <option value="">No courts yet</option>}
-              {courts.map((court) => (
-                <option key={court.id} value={court.id}>
-                  {court.name}
-                </option>
-              ))}
-            </select>
-          </div>
-
-          <div>
-            <label className="block text-sm font-medium text-slate-600 mb-1">Time Slot</label>
-            <select
-              value={blockHour ?? ''}
-              onChange={(e) => setBlockHour(Number(e.target.value))}
-              className="w-full rounded-xl border border-slate-300 px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
-            >
-              {timeSlots.map((slot) => (
-                <option key={slot.hour} value={slot.hour}>
-                  {slot.label}
-                </option>
-              ))}
-            </select>
-          </div>
+      <form onSubmit={handleAddBlock} className="space-y-4 mb-5">
+        <div>
+          <label className="block text-sm font-medium text-slate-600 mb-1">Court</label>
+          <select
+            value={blockCourtId ?? ''}
+            onChange={(e) => setBlockCourtId(e.target.value)}
+            className="w-full sm:w-64 rounded-xl border border-slate-300 px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
+          >
+            {courts.length === 0 && <option value="">No courts yet</option>}
+            {courts.map((court) => (
+              <option key={court.id} value={court.id}>
+                {court.name}
+              </option>
+            ))}
+          </select>
         </div>
 
         <div>
-          <label className="block text-sm font-medium text-slate-600 mb-1">
-            Dates{' '}
-            <span className="text-slate-400 font-normal">
-              (pick the same date for both to block just one day)
-            </span>
-          </label>
-          <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-            <div>
-              <p className="text-xs text-slate-500 mb-1">From</p>
-              <DateCalendar
-                selectedDate={blockDateFrom}
-                minDate={todayISODate()}
-                onSelect={handleSelectFromDate}
-                accentColor="var(--admin-btn-bg)"
-                isDateDisabled={isDateClosed}
-              />
-            </div>
-            <div>
-              <p className="text-xs text-slate-500 mb-1">To</p>
-              <DateCalendar
-                selectedDate={blockDateTo}
-                minDate={blockDateFrom}
-                onSelect={setBlockDateTo}
-                accentColor="var(--admin-btn-bg)"
-                isDateDisabled={isDateClosed}
-              />
-            </div>
+          <label className="block text-sm font-medium text-slate-600 mb-1">Date</label>
+          <DateCalendar
+            selectedDate={blockDate}
+            minDate={todayISODate()}
+            onSelect={setBlockDate}
+            accentColor="var(--admin-btn-bg)"
+            isDateDisabled={isDateClosed}
+          />
+        </div>
+
+        <div>
+          <div className="flex items-center justify-between mb-2">
+            <label className="block text-sm font-medium text-slate-600">
+              Time Slots{' '}
+              <span className="text-slate-400 font-normal">(click to select)</span>
+            </label>
+            {!isDateClosed(blockDate) && (
+              <div className="flex items-center gap-3">
+                <button
+                  type="button"
+                  onClick={() =>
+                    setSelectedHours(
+                      timeSlots.filter((s) => !isSlotAlreadyBlocked(s.hour)).map((s) => s.hour)
+                    )
+                  }
+                  className="text-xs text-emerald-700 hover:text-emerald-800 underline underline-offset-2"
+                >
+                  Select All Day
+                </button>
+                {selectedHours.length > 0 && (
+                  <button
+                    type="button"
+                    onClick={() => setSelectedHours([])}
+                    className="text-xs text-slate-500 hover:text-slate-700 underline underline-offset-2"
+                  >
+                    Clear
+                  </button>
+                )}
+              </div>
+            )}
           </div>
+          {isDateClosed(blockDate) ? (
+            <p className="text-sm text-slate-500 bg-slate-50 border border-slate-200 rounded-xl px-4 py-3">
+              This date is already closed — nothing to block.
+            </p>
+          ) : (
+            <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5">
+              {timeSlots.map((slot) => {
+                const blocked = isSlotAlreadyBlocked(slot.hour);
+                const selected = selectedHours.includes(slot.hour);
+                return (
+                  <button
+                    key={slot.hour}
+                    type="button"
+                    disabled={blocked}
+                    onClick={() => toggleHour(slot.hour)}
+                    style={
+                      selected
+                        ? { backgroundColor: 'var(--admin-btn-bg)', borderColor: 'var(--admin-btn-bg)' }
+                        : undefined
+                    }
+                    className={`rounded-xl border px-3 py-3 text-sm font-medium text-center transition-colors ${
+                      blocked
+                        ? 'bg-slate-100 border-slate-200 text-slate-400 cursor-not-allowed line-through'
+                        : selected
+                        ? 'text-[var(--admin-btn-label)]'
+                        : 'bg-white border-slate-300 text-slate-700 hover:border-emerald-400'
+                    }`}
+                  >
+                    {slot.label}
+                    {blocked && <span className="block text-xs mt-0.5">Already blocked</span>}
+                  </button>
+                );
+              })}
+            </div>
+          )}
         </div>
 
         <div>
@@ -339,12 +335,16 @@ export default function BlockSlotsTab() {
 
         <button
           type="submit"
-          disabled={addingBlock || !blockCourtId || targetDates.length === 0}
+          disabled={addingBlock || !blockCourtId || selectedHours.length === 0}
           className="rounded-lg bg-[var(--admin-btn-bg)] text-[var(--admin-btn-label)] text-sm font-medium px-4 py-2.5 hover:brightness-90 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
         >
           {addingBlock
             ? 'Blocking…'
-            : `Block Slot${targetDates.length === 1 ? '' : 's'}${targetDates.length > 1 ? ` (${targetDates.length} dates)` : ''}`}
+            : selectedHours.length > 0 &&
+              selectedHours.length ===
+                timeSlots.filter((s) => !isSlotAlreadyBlocked(s.hour)).length
+            ? `Block Entire Day (${selectedHours.length} slots)`
+            : `Block ${selectedHours.length} Selected Slot${selectedHours.length === 1 ? '' : 's'}`}
         </button>
       </form>
 

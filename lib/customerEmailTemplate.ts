@@ -11,6 +11,7 @@ export interface CustomerEmailParams {
   playerName: string;
   playerPhone: string;
   transactionId: number | null;
+  dailySequence: number | null; // bookings.daily_sequence — used to build Confirmation #
   courtName: string;
   dateLabel: string; // e.g. "Jul 22, 2026"
   bookingDateISO: string; // "YYYY-MM-DD", Philippine time — used to build Confirmation #
@@ -60,6 +61,7 @@ export function buildCustomerConfirmationEmail(
     playerName,
     playerPhone,
     transactionId,
+    dailySequence,
     courtName,
     dateLabel,
     bookingDateISO,
@@ -76,7 +78,7 @@ export function buildCustomerConfirmationEmail(
   const footerHtml = params.footerHtml ? normalizeRichText(params.footerHtml) : null;
 
   const confirmationNumber =
-    transactionId !== null ? formatConfirmationNumber(transactionId, bookingDateISO) : null;
+    dailySequence !== null ? formatConfirmationNumber(dailySequence, bookingDateISO) : null;
   const referenceNumber = transactionId !== null ? formatReferenceNumber(transactionId) : null;
 
   // ---------- Plain text (fallback for clients that don't render HTML) ----------

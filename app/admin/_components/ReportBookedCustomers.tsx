@@ -5,6 +5,7 @@ import { supabase } from '@/lib/supabase';
 import { fetchSiteSettings, DEFAULT_SITE_SETTINGS, type SiteSettings } from '@/lib/siteSettings';
 import { formatPrice } from '@/lib/priceTiers';
 import { downloadCsv } from '@/lib/csvExport';
+import { formatConfirmationNumber } from '@/lib/confirmationCode';
 
 type BookingStatus = 'pending' | 'confirmed' | 'cancelled';
 type DateFilterMode = 'all' | 'today' | 'week' | 'month' | 'custom';
@@ -12,7 +13,8 @@ type StatusFilter = 'all' | BookingStatus;
 
 interface ReportRow {
   id: string;
-  transactionId: number | null;
+  dailySequence: number | null;
+  dateISO: string;
   transactionDateTime: string;
   playerName: string;
   playerPhone: string;
@@ -149,7 +151,7 @@ export default function ReportBookedCustomers() {
     let query = supabase
       .from('bookings')
       .select(
-        'id, transaction_id, player_name, player_phone, player_email, start_time, end_time, status, price, created_at, courts(name)'
+        'id, transaction_id, daily_sequence, player_name, player_phone, player_email, start_time, end_time, status, price, created_at, courts(name)'
       )
       .order('start_time', { ascending: false });
 
@@ -167,6 +169,7 @@ export default function ReportBookedCustomers() {
     type Raw = {
       id: string;
       transaction_id: number | null;
+      daily_sequence: number | null;
       player_name: string;
       player_phone: string;
       player_email: string | null;
@@ -188,7 +191,8 @@ export default function ReportBookedCustomers() {
       })
       .map((b) => ({
         id: b.id,
-        transactionId: b.transaction_id,
+        dailySequence: b.daily_sequence,
+        dateISO: bookingDatePH(b.start_time),
         transactionDateTime: formatTransactionDateTime(b.created_at),
         playerName: b.player_name,
         playerPhone: b.player_phone,
@@ -224,7 +228,8 @@ export default function ReportBookedCustomers() {
     downloadCsv(
       `booked-customers-${todayPH()}.csv`,
       result.map((r) => ({
-        'Transaction #': r.transactionId !== null ? r.transactionId : '',
+        'Confirmation #':
+          r.dailySequence !== null ? formatConfirmationNumber(r.dailySequence, r.dateISO) : '',
         'Transaction Date/Time': r.transactionDateTime,
         Player: r.playerName,
         Phone: r.playerPhone,
@@ -364,7 +369,7 @@ export default function ReportBookedCustomers() {
                     <th className="px-4 py-2.5">Player</th>
                     <th className="px-4 py-2.5">Phone</th>
                     <th className="px-4 py-2.5">Email</th>
-                    <th className="px-4 py-2.5">Transaction #</th>
+                    <th className="px-4 py-2.5">Confirmation #</th>
                     <th className="px-4 py-2.5">Transaction Date/Time</th>
                     <th className="px-4 py-2.5">Court</th>
                     <th className="px-4 py-2.5">Date</th>
@@ -385,8 +390,10 @@ export default function ReportBookedCustomers() {
                       <td className="px-4 py-2.5 text-slate-600 whitespace-nowrap">
                         {row.playerEmail ?? '—'}
                       </td>
-                      <td className="px-4 py-2.5 text-slate-600 whitespace-nowrap">
-                        {row.transactionId !== null ? `#${row.transactionId}` : '—'}
+                      <td className="px-4 py-2.5 text-slate-600 whitespace-nowrap font-mono text-xs">
+                        {row.dailySequence !== null
+                          ? formatConfirmationNumber(row.dailySequence, row.dateISO)
+                          : '—'}
                       </td>
                       <td className="px-4 py-2.5 text-slate-600 whitespace-nowrap">
                         {row.transactionDateTime}

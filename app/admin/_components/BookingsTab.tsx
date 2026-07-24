@@ -30,6 +30,8 @@ interface Booking {
   price: number | null;
   checked_in: boolean;
   checked_in_at: string | null;
+  daily_sequence: number | null;
+  reschedule_reason: string | null;
   courts: { name: string } | null;
 }
 
@@ -41,6 +43,7 @@ interface Court {
 interface TransactionGroup {
   key: string;
   transactionId: number | null;
+  dailySequence: number | null;
   bookings: Booking[];
   playerName: string;
   playerPhone: string;
@@ -291,7 +294,7 @@ export default function BookingsTab() {
     let query = supabase
       .from('bookings')
       .select(
-        'id, court_id, transaction_id, player_name, player_phone, player_email, start_time, end_time, status, receipt_url, created_at, price, checked_in, checked_in_at, courts(name)'
+        'id, court_id, transaction_id, player_name, player_phone, player_email, start_time, end_time, status, receipt_url, created_at, price, checked_in, checked_in_at, daily_sequence, reschedule_reason, courts(name)'
       )
       .order('id', { ascending: false });
 
@@ -398,6 +401,7 @@ export default function BookingsTab() {
       groups.push({
         key,
         transactionId: first.transaction_id,
+        dailySequence: first.daily_sequence,
         bookings: sorted,
         playerName: first.player_name,
         playerPhone: first.player_phone,
@@ -597,6 +601,7 @@ export default function BookingsTab() {
   const [rescheduleBooking, setRescheduleBooking] = useState<Booking | null>(null);
   const [rescheduleDate, setRescheduleDate] = useState('');
   const [rescheduleHour, setRescheduleHour] = useState<number | null>(null);
+  const [rescheduleReason, setRescheduleReason] = useState('');
   const [rescheduleConflicts, setRescheduleConflicts] = useState<Set<number>>(new Set());
   const [rescheduleLoadingConflicts, setRescheduleLoadingConflicts] = useState(false);
   const [rescheduleSaving, setRescheduleSaving] = useState(false);
@@ -606,6 +611,7 @@ export default function BookingsTab() {
     setRescheduleBooking(booking);
     setRescheduleDate(booking.start_time.split('T')[0]);
     setRescheduleHour(new Date(booking.start_time).getHours());
+    setRescheduleReason('');
     setRescheduleError(null);
   }
 
@@ -664,6 +670,12 @@ export default function BookingsTab() {
   async function handleConfirmReschedule() {
     if (!rescheduleBooking || rescheduleHour === null) return;
 
+    const reason = rescheduleReason.trim();
+    if (!reason) {
+      setRescheduleError('Please enter a reason for this reschedule.');
+      return;
+    }
+
     const slot = timeSlots.find((s) => s.hour === rescheduleHour);
     if (!slot) return;
 
@@ -682,6 +694,7 @@ export default function BookingsTab() {
       // Recalculate in case the new slot falls in a different price tier
       // than the original one.
       price: getSlotPrice(slot.hour, settings.pricing_mode, settings.flat_price, priceTiers),
+      reschedule_reason: reason,
     };
     // Give it a fresh hold window rather than having it show as
     // immediately hold-expired right after being rescheduled.
@@ -867,9 +880,9 @@ export default function BookingsTab() {
                         )}
                       </td>
                       <td className="px-4 sm:px-6 py-3 text-slate-600 whitespace-nowrap font-mono text-xs">
-                        {group.transactionId !== null
+                        {group.dailySequence !== null
                           ? formatConfirmationNumber(
-                              group.transactionId,
+                              group.dailySequence,
                               playDateISO(group.bookings[0].start_time)
                             )
                           : '—'}
@@ -1053,21 +1066,25 @@ export default function BookingsTab() {
             </div>
 
             <div className="p-5 space-y-4">
-              {detailsGroup.transactionId !== null && (
+              {(detailsGroup.dailySequence !== null || detailsGroup.transactionId !== null) && (
                 <div className="rounded-xl bg-slate-50 border border-slate-200 px-3 py-2.5 space-y-2">
-                  <CopyableCode
-                    icon="ticket"
-                    label="Confirmation #"
-                    value={formatConfirmationNumber(
-                      detailsGroup.transactionId,
-                      playDateISO(detailsGroup.bookings[0].start_time)
-                    )}
-                  />
-                  <CopyableCode
-                    icon="hash"
-                    label="Reference #"
-                    value={formatReferenceNumber(detailsGroup.transactionId)}
-                  />
+                  {detailsGroup.dailySequence !== null && (
+                    <CopyableCode
+                      icon="ticket"
+                      label="Confirmation #"
+                      value={formatConfirmationNumber(
+                        detailsGroup.dailySequence,
+                        playDateISO(detailsGroup.bookings[0].start_time)
+                      )}
+                    />
+                  )}
+                  {detailsGroup.transactionId !== null && (
+                    <CopyableCode
+                      icon="hash"
+                      label="Reference #"
+                      value={formatReferenceNumber(detailsGroup.transactionId)}
+                    />
+                  )}
                 </div>
               )}
 
@@ -1150,6 +1167,11 @@ export default function BookingsTab() {
                           {isHoldExpired(booking) && (
                             <span className="block text-[11px] text-amber-600 mt-1">
                               Hold expired
+                            </span>
+                          )}
+                          {booking.reschedule_reason && (
+                            <span className="block text-[11px] text-slate-500 mt-1 italic">
+                              Rescheduled: {booking.reschedule_reason}
                             </span>
                           )}
                         </div>
@@ -1260,11 +1282,30 @@ export default function BookingsTab() {
                 )}
               </div>
 
+              <div>
+                <label className="block text-sm font-medium text-slate-600 mb-1">
+                  Reason for reschedule
+                </label>
+                <textarea
+                  value={rescheduleReason}
+                  onChange={(e) => setRescheduleReason(e.target.value)}
+                  disabled={rescheduleSaving}
+                  rows={2}
+                  placeholder="e.g. Customer requested a different time"
+                  className="w-full rounded-xl border border-slate-300 px-3 py-2.5 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500 disabled:bg-slate-50 resize-none"
+                />
+              </div>
+
               {rescheduleError && <p className="text-sm text-red-600">{rescheduleError}</p>}
 
               <button
                 onClick={handleConfirmReschedule}
-                disabled={rescheduleSaving || rescheduleLoadingConflicts || rescheduleHour === null}
+                disabled={
+                  rescheduleSaving ||
+                  rescheduleLoadingConflicts ||
+                  rescheduleHour === null ||
+                  !rescheduleReason.trim()
+                }
                 className="w-full rounded-xl bg-[var(--admin-btn-bg)] text-[var(--admin-btn-label)] font-medium py-2.5 text-sm hover:brightness-90 disabled:opacity-60 disabled:cursor-not-allowed transition-colors"
               >
                 {rescheduleSaving ? 'Saving…' : 'Confirm Reschedule'}

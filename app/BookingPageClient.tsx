@@ -80,6 +80,7 @@ export default function BookingPageClient({
   const [submitState, setSubmitState] = useState<SubmitState>('idle');
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [lastTransactionId, setLastTransactionId] = useState<number | null>(null);
+  const [lastDailySequence, setLastDailySequence] = useState<number | null>(null);
   const [lastBookingStatus, setLastBookingStatus] = useState<'pending' | 'confirmed'>('pending');
 
   // ---------- Add-ons ----------
@@ -670,7 +671,7 @@ export default function BookingPageClient({
             price: getPrice(slot.hour),
           }))
         )
-        .select('id');
+        .select('id, daily_sequence');
 
       if (insertError) {
         throw new Error(`Booking could not be saved: ${insertError.message}`);
@@ -701,6 +702,7 @@ export default function BookingPageClient({
       }
 
       setLastTransactionId(transaction.id);
+      setLastDailySequence(insertedBookings?.[0]?.daily_sequence ?? null);
       setLastBookingStatus(bookingStatus);
       setSubmitState('success');
       // Superseded by the real booking rows above — release rather than
@@ -949,11 +951,13 @@ export default function BookingPageClient({
 
                   {lastTransactionId !== null && (
                     <div className="rounded-xl bg-slate-50 border border-slate-200 p-4 text-sm space-y-2 mb-3">
-                      <CopyableCode
-                        icon="ticket"
-                        label="Confirmation #"
-                        value={formatConfirmationNumber(lastTransactionId, selectedDate)}
-                      />
+                      {lastDailySequence !== null && (
+                        <CopyableCode
+                          icon="ticket"
+                          label="Confirmation #"
+                          value={formatConfirmationNumber(lastDailySequence, selectedDate)}
+                        />
+                      )}
                       <CopyableCode
                         icon="hash"
                         label="Reference #"

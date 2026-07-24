@@ -11,6 +11,7 @@ import { getDirectionsUrl } from '@/lib/googleMaps';
 interface ConfirmedBookingRow {
   id: string;
   transaction_id: number | null;
+  daily_sequence: number | null;
   player_name: string;
   player_phone: string;
   player_email: string | null;
@@ -65,7 +66,7 @@ export async function POST(request: NextRequest) {
   const { data, error } = await supabase
     .from('bookings')
     .select(
-      'id, transaction_id, player_name, player_phone, player_email, start_time, end_time, price, receipt_url, courts(name)'
+      'id, transaction_id, daily_sequence, player_name, player_phone, player_email, start_time, end_time, price, receipt_url, courts(name)'
     )
     .eq('id', bookingId)
     .eq('status', 'confirmed')
@@ -136,6 +137,7 @@ export async function POST(request: NextRequest) {
     playerName: booking.player_name,
     playerPhone: booking.player_phone,
     transactionId: booking.transaction_id,
+    dailySequence: booking.daily_sequence,
     courtName,
     dateLabel,
     bookingDateISO,

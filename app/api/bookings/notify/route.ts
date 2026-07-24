@@ -10,6 +10,7 @@ import { getDirectionsUrl } from '@/lib/googleMaps';
 interface NotifyBookingRow {
   id: string;
   transaction_id: number | null;
+  daily_sequence: number | null;
   player_name: string;
   player_phone: string;
   player_email: string | null;
@@ -35,7 +36,7 @@ export async function POST(request: NextRequest) {
   const { data, error } = await supabase
     .from('bookings')
     .select(
-      'id, transaction_id, player_name, player_phone, player_email, start_time, end_time, status, receipt_url, price, courts(name)'
+      'id, transaction_id, daily_sequence, player_name, player_phone, player_email, start_time, end_time, status, receipt_url, price, courts(name)'
     )
     .in('id', bookingIds)
     .order('start_time', { ascending: true });
@@ -166,6 +167,7 @@ export async function POST(request: NextRequest) {
         playerName: first.player_name,
         playerPhone: first.player_phone,
         transactionId: first.transaction_id,
+        dailySequence: first.daily_sequence,
         courtName,
         dateLabel: formatDate(first.start_time),
         bookingDateISO: new Date(first.start_time).toLocaleDateString('en-CA', {

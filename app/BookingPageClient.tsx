@@ -11,6 +11,7 @@ import { compressImage } from '@/lib/compressImage';
 import { getSlotPrice, formatPrice, type PriceTier } from '@/lib/priceTiers';
 import { fetchActiveAddons, type Addon } from '@/lib/addons';
 import { formatConfirmationNumber, formatReferenceNumber } from '@/lib/confirmationCode';
+import { hasSlotConflict } from '@/lib/slotAvailability';
 import CopyableCode from '@/components/CopyableCode';
 
 // ---------- Types ----------
@@ -167,56 +168,11 @@ export default function BookingPageClient({
   // would just be our own (we already reserved it when the modal opened),
   // which isn't a conflict with ourselves.
   const hasConflict = useCallback(
-    async (courtId: string, date: string, slots: TimeSlot[], includeActiveHolds = false) => {
-      const dayStart = new Date(`${date}T00:00:00`).toISOString();
-      const dayEnd = new Date(`${date}T23:59:59`).toISOString();
-
-      const [bookingsResult, blockedResult, holdsResult] = await Promise.all([
-        supabase
-          .from('bookings')
-          .select('start_time, status, created_at')
-          .eq('court_id', courtId)
-          .gte('start_time', dayStart)
-          .lte('start_time', dayEnd)
-          .in('status', ['pending', 'confirmed']),
-        supabase
-          .from('blocked_slots')
-          .select('start_time')
-          .eq('court_id', courtId)
-          .gte('start_time', dayStart)
-          .lte('start_time', dayEnd),
-        includeActiveHolds
-          ? supabase
-              .from('slot_holds')
-              .select('start_time, created_at')
-              .eq('court_id', courtId)
-              .gte('start_time', dayStart)
-              .lte('start_time', dayEnd)
-          : Promise.resolve({ data: null, error: null }),
-      ]);
-
-      const nowTime = Date.now();
-      const takenTimes = new Set<number>(
-        (
-          (bookingsResult.data as { start_time: string; status: string; created_at: string }[]) ?? []
-        )
-          .filter((row) => {
-            if (row.status !== 'pending') return true;
-            return nowTime - new Date(row.created_at).getTime() < approvalHoldMs;
-          })
-          .map((row) => new Date(row.start_time).getTime())
-      );
-      ((blockedResult.data as { start_time: string }[]) ?? []).forEach((row) =>
-        takenTimes.add(new Date(row.start_time).getTime())
-      );
-      if (includeActiveHolds) {
-        ((holdsResult.data as { start_time: string; created_at: string }[] | null) ?? [])
-          .filter((row) => nowTime - new Date(row.created_at).getTime() < checkoutHoldMs)
-          .forEach((row) => takenTimes.add(new Date(row.start_time).getTime()));
-      }
-
-      return slots.some((slot) => takenTimes.has(new Date(slot.startISO(date)).getTime()));
-    },
+    async (courtId: string, date: string, slots: TimeSlot[], includeActiveHolds = false) =>
+      hasSlotConflict(supabase, courtId, date, slots, approvalHoldMs, {
+        includeActiveHolds,
+        checkoutHoldMs,
+      }),
     [approvalHoldMs, checkoutHoldMs]
   );
 

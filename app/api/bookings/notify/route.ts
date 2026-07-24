@@ -11,6 +11,7 @@ interface NotifyBookingRow {
   id: string;
   transaction_id: number | null;
   daily_sequence: number | null;
+  admin_remark: string | null;
   player_name: string;
   player_phone: string;
   player_email: string | null;
@@ -36,7 +37,7 @@ export async function POST(request: NextRequest) {
   const { data, error } = await supabase
     .from('bookings')
     .select(
-      'id, transaction_id, daily_sequence, player_name, player_phone, player_email, start_time, end_time, status, receipt_url, price, courts(name)'
+      'id, transaction_id, daily_sequence, admin_remark, player_name, player_phone, player_email, start_time, end_time, status, receipt_url, price, courts(name)'
     )
     .in('id', bookingIds)
     .order('start_time', { ascending: true });
@@ -105,6 +106,8 @@ export async function POST(request: NextRequest) {
 
   const receiptExt = first.receipt_url?.split('.').pop()?.split(/[?#]/)[0] || 'jpg';
 
+  const bookedByAdmin = first.admin_remark !== null;
+
   const subject =
     bookings.length > 1
       ? `New booking: ${first.player_name} — ${courtName} (${bookings.length} slots)`
@@ -118,7 +121,9 @@ export async function POST(request: NextRequest) {
       text: [
         `${first.player_name} (${first.player_phone}${
           first.player_email ? `, ${first.player_email}` : ''
-        }) just booked ${courtName}${bookings.length > 1 ? ` (${bookings.length} slots)` : ''}.`,
+        }) ${bookedByAdmin ? 'was booked by an admin for' : 'just booked'} ${courtName}${
+          bookings.length > 1 ? ` (${bookings.length} slots)` : ''
+        }.`,
         bookings.length > 1
           ? `Date: ${formatDate(first.start_time)} (Philippine time)`
           : `When: ${formatDate(first.start_time)}, ${formatSlotRange(first.start_time, first.end_time)} (Philippine time)`,
@@ -126,7 +131,11 @@ export async function POST(request: NextRequest) {
         `Total Hours: ${totalHours}`,
         hasPrices ? `Total: ${formatPrice(total)}` : '',
         `Status: ${first.status}`,
-        first.receipt_url ? 'Receipt: attached to this email.' : 'Receipt: not uploaded.',
+        bookedByAdmin
+          ? `Remark: ${first.admin_remark}`
+          : first.receipt_url
+            ? 'Receipt: attached to this email.'
+            : 'Receipt: not uploaded.',
         '',
         'Review in the admin dashboard.',
       ]

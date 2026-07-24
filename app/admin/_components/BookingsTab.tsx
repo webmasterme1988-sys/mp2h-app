@@ -9,6 +9,7 @@ import { fetchHolidays, type Holiday } from '@/lib/holidays';
 import { fetchPriceTiers, getSlotPrice, formatPrice, type PriceTier } from '@/lib/priceTiers';
 import { formatConfirmationNumber, formatReferenceNumber } from '@/lib/confirmationCode';
 import CopyableCode from '@/components/CopyableCode';
+import AdminBookingModal from './AdminBookingModal';
 
 type BookingStatus = 'pending' | 'confirmed' | 'cancelled';
 type DateFilterMode = 'all' | 'today' | 'week' | 'month' | 'custom';
@@ -32,6 +33,7 @@ interface Booking {
   checked_in_at: string | null;
   daily_sequence: number | null;
   reschedule_reason: string | null;
+  admin_remark: string | null;
   courts: { name: string } | null;
 }
 
@@ -194,6 +196,9 @@ export default function BookingsTab() {
   const [pageSize, setPageSize] = useState(10);
   const [currentPage, setCurrentPage] = useState(1);
 
+  // ---------- Admin-created booking ----------
+  const [adminBookingModalOpen, setAdminBookingModalOpen] = useState(false);
+
   // ---------- Details modal ----------
   const [detailsKey, setDetailsKey] = useState<string | null>(null);
 
@@ -294,7 +299,7 @@ export default function BookingsTab() {
     let query = supabase
       .from('bookings')
       .select(
-        'id, court_id, transaction_id, player_name, player_phone, player_email, start_time, end_time, status, receipt_url, created_at, price, checked_in, checked_in_at, daily_sequence, reschedule_reason, courts(name)'
+        'id, court_id, transaction_id, player_name, player_phone, player_email, start_time, end_time, status, receipt_url, created_at, price, checked_in, checked_in_at, daily_sequence, reschedule_reason, admin_remark, courts(name)'
       )
       .order('id', { ascending: false });
 
@@ -720,6 +725,15 @@ export default function BookingsTab() {
 
   return (
     <div className="space-y-6">
+      <div className="flex justify-end">
+        <button
+          onClick={() => setAdminBookingModalOpen(true)}
+          className="rounded-xl bg-[var(--admin-btn-bg)] text-[var(--admin-btn-label)] text-sm font-medium px-4 py-2.5 hover:brightness-90 transition-colors"
+        >
+          + Book for Customer
+        </button>
+      </div>
+
       <section className="bg-white rounded-2xl shadow-sm border border-slate-200 p-4 sm:p-6">
         <div className="flex items-center justify-between mb-3">
           <h2 className="text-lg font-semibold text-slate-800">Filters</h2>
@@ -1174,6 +1188,11 @@ export default function BookingsTab() {
                               Rescheduled: {booking.reschedule_reason}
                             </span>
                           )}
+                          {booking.admin_remark && (
+                            <span className="block text-[11px] text-slate-500 mt-1 italic">
+                              Remark: {booking.admin_remark}
+                            </span>
+                          )}
                         </div>
                         {settings.show_price && booking.price !== null && (
                           <span className="text-sm text-slate-600 shrink-0">
@@ -1313,6 +1332,16 @@ export default function BookingsTab() {
             </div>
           </div>
         </div>
+      )}
+
+      {adminBookingModalOpen && (
+        <AdminBookingModal
+          settings={settings}
+          priceTiers={priceTiers}
+          courts={courts}
+          onClose={() => setAdminBookingModalOpen(false)}
+          onBooked={fetchBookings}
+        />
       )}
     </div>
   );

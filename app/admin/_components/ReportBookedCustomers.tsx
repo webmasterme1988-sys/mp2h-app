@@ -24,6 +24,8 @@ interface ReportRow {
   time: string;
   status: BookingStatus;
   price: number | null;
+  remark: string | null;
+  rescheduleReason: string | null;
 }
 
 interface Court {
@@ -151,7 +153,7 @@ export default function ReportBookedCustomers() {
     let query = supabase
       .from('bookings')
       .select(
-        'id, transaction_id, daily_sequence, player_name, player_phone, player_email, start_time, end_time, status, price, created_at, courts(name)'
+        'id, transaction_id, daily_sequence, admin_remark, reschedule_reason, player_name, player_phone, player_email, start_time, end_time, status, price, created_at, courts(name)'
       )
       .order('start_time', { ascending: false });
 
@@ -170,6 +172,8 @@ export default function ReportBookedCustomers() {
       id: string;
       transaction_id: number | null;
       daily_sequence: number | null;
+      admin_remark: string | null;
+      reschedule_reason: string | null;
       player_name: string;
       player_phone: string;
       player_email: string | null;
@@ -202,6 +206,8 @@ export default function ReportBookedCustomers() {
         time: formatSlotTimeRange(b.start_time, b.end_time),
         status: b.status,
         price: b.price,
+        remark: b.admin_remark,
+        rescheduleReason: b.reschedule_reason,
       }));
 
     return result;
@@ -239,6 +245,8 @@ export default function ReportBookedCustomers() {
         Time: r.time,
         Status: r.status,
         ...(settings.show_price ? { Price: r.price !== null ? r.price : '' } : {}),
+        Remark: r.remark ?? '',
+        'Reschedule Reason': r.rescheduleReason ?? '',
       }))
     );
   }
@@ -376,6 +384,8 @@ export default function ReportBookedCustomers() {
                     <th className="px-4 py-2.5">Time</th>
                     <th className="px-4 py-2.5">Status</th>
                     {settings.show_price && <th className="px-4 py-2.5">Price</th>}
+                    <th className="px-4 py-2.5">Remark</th>
+                    <th className="px-4 py-2.5">Reschedule Reason</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -415,6 +425,15 @@ export default function ReportBookedCustomers() {
                           {row.price !== null ? formatPrice(row.price) : '—'}
                         </td>
                       )}
+                      <td className="px-4 py-2.5 text-slate-600 max-w-[16rem] truncate" title={row.remark ?? ''}>
+                        {row.remark ?? '—'}
+                      </td>
+                      <td
+                        className="px-4 py-2.5 text-slate-600 max-w-[16rem] truncate"
+                        title={row.rescheduleReason ?? ''}
+                      >
+                        {row.rescheduleReason ?? '—'}
+                      </td>
                     </tr>
                   ))}
                 </tbody>

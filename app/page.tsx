@@ -3,7 +3,7 @@ import { createPublicServerClient } from '@/lib/supabase/publicServerClient';
 import { fetchSiteSettings } from '@/lib/siteSettings';
 import { fetchLandingPhotos } from '@/lib/landingPhotos';
 import { formatHourLabel } from '@/lib/timeSlots';
-import { getDirectionsUrl } from '@/lib/googleMaps';
+import { getDirectionsUrl, getMapsEmbedUrl } from '@/lib/googleMaps';
 import { normalizeRichText } from '@/lib/richText';
 import GalleryLightbox from '@/components/GalleryLightbox';
 import {
@@ -69,9 +69,7 @@ export default async function LandingPage() {
     settings.landing_contact_email ||
     hasSocialLinks;
 
-  const mapsEmbedUrl = settings.landing_address
-    ? `https://www.google.com/maps?q=${encodeURIComponent(settings.landing_address)}&output=embed`
-    : null;
+  const mapsEmbedUrl = await getMapsEmbedUrl(settings);
   const directionsUrl = getDirectionsUrl(settings);
   const showFbChat = settings.landing_enable_fb_chat && settings.landing_facebook_page_id;
 

@@ -193,10 +193,20 @@ export default function AdminPage() {
     };
   }, [router]);
 
+  const [signingOut, setSigningOut] = useState(false);
+
   async function handleSignOut() {
+    // Calling push() immediately followed by refresh() cancels the
+    // navigation partway through — refresh() invalidates the router cache
+    // for the route being left, which interrupts the in-flight transition
+    // to /admin/login, so the redirect only actually lands on a second
+    // click. router.replace() alone is enough — this page and the login
+    // page are both fully client-rendered, so there's no server data here
+    // that needs a separate refresh.
+    if (signingOut) return;
+    setSigningOut(true);
     await supabase.auth.signOut();
-    router.push('/admin/login');
-    router.refresh();
+    router.replace('/admin/login');
   }
 
   // ---------- New-booking notifications ----------
@@ -329,9 +339,10 @@ export default function AdminPage() {
             </button>
             <button
               onClick={handleSignOut}
-              className="rounded-xl border border-white/30 bg-white/10 px-4 py-2 text-sm font-medium hover:bg-white/20 transition-colors"
+              disabled={signingOut}
+              className="rounded-xl border border-white/30 bg-white/10 px-4 py-2 text-sm font-medium hover:bg-white/20 disabled:opacity-60 disabled:cursor-not-allowed transition-colors"
             >
-              Sign out
+              {signingOut ? 'Signing out…' : 'Sign out'}
             </button>
           </div>
         </div>

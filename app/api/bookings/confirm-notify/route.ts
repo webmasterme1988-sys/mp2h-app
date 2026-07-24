@@ -11,7 +11,6 @@ import { getDirectionsUrl } from '@/lib/googleMaps';
 interface ConfirmedBookingRow {
   id: string;
   transaction_id: number | null;
-  daily_sequence: number | null;
   player_name: string;
   player_phone: string;
   player_email: string | null;
@@ -19,6 +18,8 @@ interface ConfirmedBookingRow {
   end_time: string;
   price: number | null;
   receipt_url: string | null;
+  created_at: string;
+  transactions: { confirmation_number: string | null } | null;
   courts: { name: string } | null;
 }
 
@@ -66,7 +67,7 @@ export async function POST(request: NextRequest) {
   const { data, error } = await supabase
     .from('bookings')
     .select(
-      'id, transaction_id, daily_sequence, player_name, player_phone, player_email, start_time, end_time, price, receipt_url, courts(name)'
+      'id, transaction_id, player_name, player_phone, player_email, start_time, end_time, price, receipt_url, created_at, transactions(confirmation_number), courts(name)'
     )
     .eq('id', bookingId)
     .eq('status', 'confirmed')
@@ -110,9 +111,6 @@ export async function POST(request: NextRequest) {
     dateStyle: 'medium',
     timeZone: 'Asia/Manila',
   });
-  const bookingDateISO = new Date(booking.start_time).toLocaleDateString('en-CA', {
-    timeZone: 'Asia/Manila',
-  });
   // "9:00 AM to 10:00 AM" — the actual booked slot, not just its start time.
   const formatTime = (iso: string) =>
     new Date(iso).toLocaleTimeString('en-US', {
@@ -137,10 +135,9 @@ export async function POST(request: NextRequest) {
     playerName: booking.player_name,
     playerPhone: booking.player_phone,
     transactionId: booking.transaction_id,
-    dailySequence: booking.daily_sequence,
+    confirmationNumber: booking.transactions?.confirmation_number ?? null,
     courtName,
     dateLabel,
-    bookingDateISO,
     slots: [{ timeRange, price: booking.price }],
     totalHours: 1,
     totalPrice: booking.price,

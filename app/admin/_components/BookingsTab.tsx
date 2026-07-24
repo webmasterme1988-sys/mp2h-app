@@ -7,7 +7,7 @@ import { buildTimeSlots, todayISODate } from '@/lib/timeSlots';
 import { fetchSiteSettings, DEFAULT_SITE_SETTINGS, type SiteSettings } from '@/lib/siteSettings';
 import { fetchHolidays, type Holiday } from '@/lib/holidays';
 import { fetchPriceTiers, getSlotPrice, formatPrice, type PriceTier } from '@/lib/priceTiers';
-import { formatConfirmationNumber, formatReferenceNumber } from '@/lib/confirmationCode';
+import { formatReferenceNumber } from '@/lib/confirmationCode';
 import CopyableCode from '@/components/CopyableCode';
 import AdminBookingModal from './AdminBookingModal';
 
@@ -31,9 +31,9 @@ interface Booking {
   price: number | null;
   checked_in: boolean;
   checked_in_at: string | null;
-  daily_sequence: number | null;
   reschedule_reason: string | null;
   admin_remark: string | null;
+  transactions: { confirmation_number: string | null } | null;
   courts: { name: string } | null;
 }
 
@@ -45,7 +45,7 @@ interface Court {
 interface TransactionGroup {
   key: string;
   transactionId: number | null;
-  dailySequence: number | null;
+  confirmationNumber: string | null;
   bookings: Booking[];
   playerName: string;
   playerPhone: string;
@@ -70,10 +70,15 @@ function formatDateTime(iso: string) {
   });
 }
 
-// Confirmation # is stamped with the court date (Philippine time), not the
-// date the booking was submitted — 'en-CA' formats as YYYY-MM-DD directly.
-function playDateISO(startIso: string) {
-  return new Date(startIso).toLocaleDateString('en-CA', { timeZone: 'Asia/Manila' });
+// "Jul 24, 2026" — pinned to Philippine time so the booked court date shows
+// correctly regardless of what timezone the admin's browser is in.
+function formatDateOnly(iso: string) {
+  return new Date(iso).toLocaleDateString('en-US', {
+    month: 'short',
+    day: 'numeric',
+    year: 'numeric',
+    timeZone: 'Asia/Manila',
+  });
 }
 
 // "6:00 AM - 7:00 AM" for a single booked slot — pinned to Philippine time
@@ -176,17 +181,22 @@ export default function BookingsTab() {
   const [courts, setCourts] = useState<Court[]>([]);
 
   // ---------- Filters ----------
-  // Defaults to "This month" rather than "All dates" — fetching and
-  // rendering the entire history of the table on every mount (including
-  // every time the admin switches back to this tab) is what caused the
-  // dashboard to freeze once real booking volume built up.
-  const [dateFilterMode, setDateFilterMode] = useState<DateFilterMode>('month');
+  // Defaults to "Today" — fetching and rendering the entire history of the
+  // table on every mount (including every time the admin switches back to
+  // this tab) is what caused the dashboard to freeze once real booking
+  // volume built up. This filter is on the transaction date (created_at),
+  // i.e. when the booking was made — separate from "Booking date" below,
+  // which is the date of the court slot itself (start_time).
+  const [dateFilterMode, setDateFilterMode] = useState<DateFilterMode>('today');
   const [customDateFrom, setCustomDateFrom] = useState('');
   const [customDateTo, setCustomDateTo] = useState('');
+  const [bookingDateFilterMode, setBookingDateFilterMode] = useState<DateFilterMode>('all');
+  const [customBookingDateFrom, setCustomBookingDateFrom] = useState('');
+  const [customBookingDateTo, setCustomBookingDateTo] = useState('');
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
   const [courtFilter, setCourtFilter] = useState<string>('all');
   const [phoneSearch, setPhoneSearch] = useState('');
-  const [confirmationSearch, setConfirmationSearch] = useState('');
+  const [referenceSearch, setReferenceSearch] = useState('');
 
   // ---------- Sorting ----------
   const [sortColumn, setSortColumn] = useState<SortColumn | null>(null);
@@ -231,37 +241,43 @@ export default function BookingsTab() {
 
   // Date/status/court are now applied server-side in fetchBookings (see
   // below) so the fetch itself stays bounded — this only handles the
-  // phone/confirmation# search, which stay client-side since they're
+  // phone/reference# search, which stay client-side since they're
   // live-typing and shouldn't trigger a network round-trip per keystroke.
   const filteredBookings = useMemo(() => {
     const phoneQuery = phoneSearch.trim().toLowerCase();
-    const confirmationQuery = confirmationSearch.trim();
+    const referenceQuery = referenceSearch.trim().toLowerCase();
     return bookings.filter((b) => {
       if (phoneQuery && !b.player_phone.toLowerCase().includes(phoneQuery)) return false;
-      if (confirmationQuery && !String(b.transaction_id ?? '').includes(confirmationQuery)) {
-        return false;
+      if (referenceQuery) {
+        const reference =
+          b.transaction_id !== null ? formatReferenceNumber(b.transaction_id).toLowerCase() : '';
+        if (!reference.includes(referenceQuery)) return false;
       }
       return true;
     });
-  }, [bookings, phoneSearch, confirmationSearch]);
+  }, [bookings, phoneSearch, referenceSearch]);
 
   function clearFilters() {
-    setDateFilterMode('month');
+    setDateFilterMode('today');
     setCustomDateFrom('');
     setCustomDateTo('');
+    setBookingDateFilterMode('all');
+    setCustomBookingDateFrom('');
+    setCustomBookingDateTo('');
     setStatusFilter('all');
     setCourtFilter('all');
     setPhoneSearch('');
-    setConfirmationSearch('');
+    setReferenceSearch('');
     setCurrentPage(1);
   }
 
   const filtersActive =
-    dateFilterMode !== 'month' ||
+    dateFilterMode !== 'today' ||
+    bookingDateFilterMode !== 'all' ||
     statusFilter !== 'all' ||
     courtFilter !== 'all' ||
     phoneSearch.trim() !== '' ||
-    confirmationSearch.trim() !== '';
+    referenceSearch.trim() !== '';
 
   // Keeps the "hold expired" indicator live without needing a manual refresh.
   useEffect(() => {
@@ -281,14 +297,24 @@ export default function BookingsTab() {
   const fetchBookings = useCallback(async () => {
     setError(null);
 
-    const range =
+    // Transaction date (when the booking was made — created_at).
+    const transactionRange =
       dateFilterMode === 'custom'
         ? { from: customDateFrom, to: customDateTo }
         : getPresetRange(dateFilterMode);
 
+    // Booking date (the date of the court slot itself — start_time).
+    const bookingRange =
+      bookingDateFilterMode === 'custom'
+        ? { from: customBookingDateFrom, to: customBookingDateTo }
+        : getPresetRange(bookingDateFilterMode);
+
     // Custom range selected but not fully filled in yet — don't run an
     // unbounded query in the meantime.
-    if (dateFilterMode === 'custom' && (!range.from || !range.to)) {
+    if (
+      (dateFilterMode === 'custom' && (!transactionRange.from || !transactionRange.to)) ||
+      (bookingDateFilterMode === 'custom' && (!bookingRange.from || !bookingRange.to))
+    ) {
       setBookings([]);
       setLoading(false);
       return;
@@ -299,7 +325,7 @@ export default function BookingsTab() {
     let query = supabase
       .from('bookings')
       .select(
-        'id, court_id, transaction_id, player_name, player_phone, player_email, start_time, end_time, status, receipt_url, created_at, price, checked_in, checked_in_at, daily_sequence, reschedule_reason, admin_remark, courts(name)'
+        'id, court_id, transaction_id, player_name, player_phone, player_email, start_time, end_time, status, receipt_url, created_at, price, checked_in, checked_in_at, reschedule_reason, admin_remark, transactions(confirmation_number), courts(name)'
       )
       .order('id', { ascending: false });
 
@@ -307,8 +333,10 @@ export default function BookingsTab() {
     // made and filtering client-side) keeps the fetch — and the grouping/
     // sorting/rendering that follows — proportional to the selected range
     // instead of the whole table's history.
-    if (range.from) query = query.gte('start_time', `${range.from}T00:00:00+08:00`);
-    if (range.to) query = query.lte('start_time', `${range.to}T23:59:59+08:00`);
+    if (transactionRange.from) query = query.gte('created_at', `${transactionRange.from}T00:00:00+08:00`);
+    if (transactionRange.to) query = query.lte('created_at', `${transactionRange.to}T23:59:59+08:00`);
+    if (bookingRange.from) query = query.gte('start_time', `${bookingRange.from}T00:00:00+08:00`);
+    if (bookingRange.to) query = query.lte('start_time', `${bookingRange.to}T23:59:59+08:00`);
     if (statusFilter !== 'all') query = query.eq('status', statusFilter);
     if (courtFilter !== 'all') query = query.eq('court_id', courtFilter);
 
@@ -323,7 +351,16 @@ export default function BookingsTab() {
 
     setBookings((data ?? []) as unknown as Booking[]);
     setLoading(false);
-  }, [dateFilterMode, customDateFrom, customDateTo, statusFilter, courtFilter]);
+  }, [
+    dateFilterMode,
+    customDateFrom,
+    customDateTo,
+    bookingDateFilterMode,
+    customBookingDateFrom,
+    customBookingDateTo,
+    statusFilter,
+    courtFilter,
+  ]);
 
   useEffect(() => {
     fetchBookings();
@@ -406,7 +443,7 @@ export default function BookingsTab() {
       groups.push({
         key,
         transactionId: first.transaction_id,
-        dailySequence: first.daily_sequence,
+        confirmationNumber: first.transactions?.confirmation_number ?? null,
         bookings: sorted,
         playerName: first.player_name,
         playerPhone: first.player_phone,
@@ -749,10 +786,27 @@ export default function BookingsTab() {
 
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3">
           <div>
-            <label className="block text-xs font-medium text-slate-500 mb-1">Date</label>
+            <label className="block text-xs font-medium text-slate-500 mb-1">
+              Transaction Date
+            </label>
             <select
               value={dateFilterMode}
               onChange={(e) => setDateFilterMode(e.target.value as DateFilterMode)}
+              className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
+            >
+              <option value="all">All dates</option>
+              <option value="today">Today</option>
+              <option value="week">This week</option>
+              <option value="month">This month</option>
+              <option value="custom">Custom range…</option>
+            </select>
+          </div>
+
+          <div>
+            <label className="block text-xs font-medium text-slate-500 mb-1">Booking Date</label>
+            <select
+              value={bookingDateFilterMode}
+              onChange={(e) => setBookingDateFilterMode(e.target.value as DateFilterMode)}
               className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
             >
               <option value="all">All dates</option>
@@ -808,13 +862,13 @@ export default function BookingsTab() {
 
           <div>
             <label className="block text-xs font-medium text-slate-500 mb-1">
-              Search confirmation #
+              Search reference #
             </label>
             <input
               type="text"
-              value={confirmationSearch}
-              onChange={(e) => setConfirmationSearch(e.target.value)}
-              placeholder="e.g. 1042"
+              value={referenceSearch}
+              onChange={(e) => setReferenceSearch(e.target.value)}
+              placeholder="e.g. REF-0E36F1"
               className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
             />
           </div>
@@ -823,7 +877,9 @@ export default function BookingsTab() {
         {dateFilterMode === 'custom' && (
           <div className="grid grid-cols-2 gap-3 mt-3 max-w-sm">
             <div>
-              <label className="block text-xs font-medium text-slate-500 mb-1">From</label>
+              <label className="block text-xs font-medium text-slate-500 mb-1">
+                Transaction date from
+              </label>
               <input
                 type="date"
                 value={customDateFrom}
@@ -832,11 +888,40 @@ export default function BookingsTab() {
               />
             </div>
             <div>
-              <label className="block text-xs font-medium text-slate-500 mb-1">To</label>
+              <label className="block text-xs font-medium text-slate-500 mb-1">
+                Transaction date to
+              </label>
               <input
                 type="date"
                 value={customDateTo}
                 onChange={(e) => setCustomDateTo(e.target.value)}
+                className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
+              />
+            </div>
+          </div>
+        )}
+
+        {bookingDateFilterMode === 'custom' && (
+          <div className="grid grid-cols-2 gap-3 mt-3 max-w-sm">
+            <div>
+              <label className="block text-xs font-medium text-slate-500 mb-1">
+                Booking date from
+              </label>
+              <input
+                type="date"
+                value={customBookingDateFrom}
+                onChange={(e) => setCustomBookingDateFrom(e.target.value)}
+                className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
+              />
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-slate-500 mb-1">
+                Booking date to
+              </label>
+              <input
+                type="date"
+                value={customBookingDateTo}
+                onChange={(e) => setCustomBookingDateTo(e.target.value)}
                 className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
               />
             </div>
@@ -863,7 +948,9 @@ export default function BookingsTab() {
                   <SortHeader column="player" sortColumn={sortColumn} sortDirection={sortDirection} onSort={handleSort}>Player</SortHeader>
                   <SortHeader column="phone" sortColumn={sortColumn} sortDirection={sortDirection} onSort={handleSort}>Phone</SortHeader>
                   <SortHeader column="transaction" sortColumn={sortColumn} sortDirection={sortDirection} onSort={handleSort}>Confirmation #</SortHeader>
-                  <SortHeader column="date" sortColumn={sortColumn} sortDirection={sortDirection} onSort={handleSort}>Date &amp; Time</SortHeader>
+                  <th className="px-4 sm:px-6 py-3 whitespace-nowrap">Reference #</th>
+                  <SortHeader column="date" sortColumn={sortColumn} sortDirection={sortDirection} onSort={handleSort}>Transaction Date</SortHeader>
+                  <th className="px-4 sm:px-6 py-3 whitespace-nowrap">Booked Date</th>
                   <SortHeader column="court" sortColumn={sortColumn} sortDirection={sortDirection} onSort={handleSort}>Court</SortHeader>
                   <SortHeader column="hours" sortColumn={sortColumn} sortDirection={sortDirection} onSort={handleSort}>Total Hours</SortHeader>
                   {settings.show_price && (
@@ -894,15 +981,16 @@ export default function BookingsTab() {
                         )}
                       </td>
                       <td className="px-4 sm:px-6 py-3 text-slate-600 whitespace-nowrap font-mono text-xs">
-                        {group.dailySequence !== null
-                          ? formatConfirmationNumber(
-                              group.dailySequence,
-                              playDateISO(group.bookings[0].start_time)
-                            )
-                          : '—'}
+                        {group.confirmationNumber ?? '—'}
+                      </td>
+                      <td className="px-4 sm:px-6 py-3 text-slate-600 whitespace-nowrap font-mono text-xs">
+                        {group.transactionId !== null ? formatReferenceNumber(group.transactionId) : '—'}
                       </td>
                       <td className="px-4 sm:px-6 py-3 text-slate-600 whitespace-nowrap">
                         {formatDateTime(group.createdAt)}
+                      </td>
+                      <td className="px-4 sm:px-6 py-3 text-slate-600 whitespace-nowrap">
+                        {formatDateOnly(group.bookings[0].start_time)}
                       </td>
                       <td className="px-4 sm:px-6 py-3 text-slate-600 whitespace-nowrap">
                         {group.courtName}
@@ -1066,8 +1154,7 @@ export default function BookingsTab() {
               <div>
                 <h3 className="font-semibold text-slate-800">Booking Details</h3>
                 <p className="text-xs text-slate-500 mt-0.5">
-                  {detailsGroup.playerName} · {detailsGroup.courtName} ·{' '}
-                  {formatDateTime(detailsGroup.createdAt)}
+                  {detailsGroup.playerName} · {detailsGroup.courtName}
                 </p>
               </div>
               <button
@@ -1080,16 +1167,13 @@ export default function BookingsTab() {
             </div>
 
             <div className="p-5 space-y-4">
-              {(detailsGroup.dailySequence !== null || detailsGroup.transactionId !== null) && (
+              {(detailsGroup.confirmationNumber !== null || detailsGroup.transactionId !== null) && (
                 <div className="rounded-xl bg-slate-50 border border-slate-200 px-3 py-2.5 space-y-2">
-                  {detailsGroup.dailySequence !== null && (
+                  {detailsGroup.confirmationNumber !== null && (
                     <CopyableCode
                       icon="ticket"
                       label="Confirmation #"
-                      value={formatConfirmationNumber(
-                        detailsGroup.dailySequence,
-                        playDateISO(detailsGroup.bookings[0].start_time)
-                      )}
+                      value={detailsGroup.confirmationNumber}
                     />
                   )}
                   {detailsGroup.transactionId !== null && (
@@ -1101,6 +1185,21 @@ export default function BookingsTab() {
                   )}
                 </div>
               )}
+
+              <div className="grid grid-cols-2 gap-3 text-sm">
+                <div>
+                  <p className="text-xs text-slate-500">Transaction Date</p>
+                  <p className="font-medium text-slate-800">
+                    {formatDateTime(detailsGroup.createdAt)}
+                  </p>
+                </div>
+                <div>
+                  <p className="text-xs text-slate-500">Booked Date</p>
+                  <p className="font-medium text-slate-800">
+                    {formatDateOnly(detailsGroup.bookings[0].start_time)}
+                  </p>
+                </div>
+              </div>
 
               <div className="flex items-center justify-between text-sm">
                 <span className="text-slate-600">

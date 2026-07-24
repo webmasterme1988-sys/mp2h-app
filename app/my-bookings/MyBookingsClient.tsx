@@ -18,12 +18,14 @@ interface Booking {
   receipt_url: string | null;
   price: number | null;
   created_at: string;
+  transactions: { confirmation_number: string | null } | null;
   courts: { name: string } | null;
 }
 
 interface TransactionGroup {
   key: string;
   transactionId: number | null;
+  confirmationNumber: string | null;
   bookings: Booking[];
   courtName: string;
   createdAt: string;
@@ -102,6 +104,7 @@ function groupByTransaction(bookings: Booking[]): TransactionGroup[] {
     groups.push({
       key,
       transactionId: first.transaction_id,
+      confirmationNumber: first.transactions?.confirmation_number ?? null,
       bookings: sorted,
       courtName: first.courts?.name ?? 'Court',
       createdAt,
@@ -140,7 +143,9 @@ export default function MyBookingsClient({ initialSettings }: { initialSettings:
 
     const { data, error } = await supabase
       .from('bookings')
-      .select('id, transaction_id, start_time, end_time, status, receipt_url, price, created_at, courts(name)')
+      .select(
+        'id, transaction_id, start_time, end_time, status, receipt_url, price, created_at, transactions(confirmation_number), courts(name)'
+      )
       .eq('player_phone', trimmedPhone)
       .order('start_time', { ascending: false });
 
@@ -219,8 +224,8 @@ export default function MyBookingsClient({ initialSettings }: { initialSettings:
                     <div>
                       <p className="font-medium text-slate-800">
                         {group.courtName}
-                        {group.transactionId !== null && (
-                          <span className="text-slate-400 font-normal"> · Transaction #{group.transactionId}</span>
+                        {group.confirmationNumber !== null && (
+                          <span className="text-slate-400 font-normal font-mono"> · {group.confirmationNumber}</span>
                         )}
                       </p>
                       <p className="text-sm text-slate-500">{formatDateTime(group.createdAt)}</p>
@@ -260,9 +265,7 @@ export default function MyBookingsClient({ initialSettings }: { initialSettings:
             <div className="sticky top-0 bg-white border-b border-slate-200 px-5 py-4 flex items-center justify-between">
               <div>
                 <h3 className="font-semibold text-slate-800">
-                  {detailsGroup.transactionId !== null
-                    ? `Confirmation #${detailsGroup.transactionId}`
-                    : 'Booking Details'}
+                  {detailsGroup.confirmationNumber ?? 'Booking Details'}
                 </h3>
                 <p className="text-xs text-slate-500 mt-0.5">
                   {detailsGroup.courtName} · {formatDateTime(detailsGroup.createdAt)}
@@ -308,10 +311,12 @@ export default function MyBookingsClient({ initialSettings }: { initialSettings:
                 </div>
               )}
 
-              {detailsGroup.transactionId !== null && (
+              {detailsGroup.confirmationNumber !== null && (
                 <div className="flex items-center justify-between text-sm">
                   <span className="text-slate-600">Confirmation Number</span>
-                  <span className="font-medium text-slate-800">#{detailsGroup.transactionId}</span>
+                  <span className="font-medium text-slate-800 font-mono">
+                    {detailsGroup.confirmationNumber}
+                  </span>
                 </div>
               )}
 

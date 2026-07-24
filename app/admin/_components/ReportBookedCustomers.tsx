@@ -5,7 +5,6 @@ import { supabase } from '@/lib/supabase';
 import { fetchSiteSettings, DEFAULT_SITE_SETTINGS, type SiteSettings } from '@/lib/siteSettings';
 import { formatPrice } from '@/lib/priceTiers';
 import { downloadCsv } from '@/lib/csvExport';
-import { formatConfirmationNumber } from '@/lib/confirmationCode';
 
 type BookingStatus = 'pending' | 'confirmed' | 'cancelled';
 type DateFilterMode = 'all' | 'today' | 'week' | 'month' | 'custom';
@@ -13,8 +12,7 @@ type StatusFilter = 'all' | BookingStatus;
 
 interface ReportRow {
   id: string;
-  dailySequence: number | null;
-  dateISO: string;
+  confirmationNumber: string | null;
   transactionDateTime: string;
   playerName: string;
   playerPhone: string;
@@ -65,7 +63,11 @@ function getPresetRange(mode: DateFilterMode): { from: string; to: string } {
   return { from: '', to: '' };
 }
 
-function bookingDatePH(iso: string) {
+// YYYY-MM-DD in Philippine time — used to compare both the booked slot's
+// date (start_time) and the transaction's date (created_at) against a
+// filter range, since both are just ISO timestamps that need the same
+// timezone-correct truncation to a calendar date.
+function datePH(iso: string) {
   return new Date(iso).toLocaleDateString('en-CA', { timeZone: 'Asia/Manila' });
 }
 
@@ -111,9 +113,18 @@ export default function ReportBookedCustomers() {
   const [settings, setSettings] = useState<SiteSettings>(DEFAULT_SITE_SETTINGS);
   const [courts, setCourts] = useState<Court[]>([]);
 
-  const [dateFilterMode, setDateFilterMode] = useState<DateFilterMode>('month');
-  const [customDateFrom, setCustomDateFrom] = useState('');
-  const [customDateTo, setCustomDateTo] = useState('');
+  // Booked date (the court slot's date, start_time) — this is the filter
+  // that already existed here, just renamed for clarity now that
+  // Transaction Date is a separate filter alongside it.
+  const [bookedDateFilterMode, setBookedDateFilterMode] = useState<DateFilterMode>('month');
+  const [customBookedDateFrom, setCustomBookedDateFrom] = useState('');
+  const [customBookedDateTo, setCustomBookedDateTo] = useState('');
+  // Transaction date (when the booking was made, created_at) — defaults to
+  // "All dates" so adding it doesn't change the report's existing default
+  // results until an admin opts into narrowing by it.
+  const [transactionDateFilterMode, setTransactionDateFilterMode] = useState<DateFilterMode>('all');
+  const [customTransactionDateFrom, setCustomTransactionDateFrom] = useState('');
+  const [customTransactionDateTo, setCustomTransactionDateTo] = useState('');
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
   const [courtFilter, setCourtFilter] = useState<string>('all');
 
@@ -138,13 +149,25 @@ export default function ReportBookedCustomers() {
   }, []);
 
   async function runReport(): Promise<ReportRow[] | null> {
-    const range =
-      dateFilterMode === 'custom'
-        ? { from: customDateFrom, to: customDateTo }
-        : getPresetRange(dateFilterMode);
+    const bookedRange =
+      bookedDateFilterMode === 'custom'
+        ? { from: customBookedDateFrom, to: customBookedDateTo }
+        : getPresetRange(bookedDateFilterMode);
 
-    if (dateFilterMode === 'custom' && (!customDateFrom || !customDateTo)) {
-      setError('Pick both a "from" and "to" date for a custom range.');
+    const transactionRange =
+      transactionDateFilterMode === 'custom'
+        ? { from: customTransactionDateFrom, to: customTransactionDateTo }
+        : getPresetRange(transactionDateFilterMode);
+
+    if (bookedDateFilterMode === 'custom' && (!customBookedDateFrom || !customBookedDateTo)) {
+      setError('Pick both a "from" and "to" date for a custom booked date range.');
+      return null;
+    }
+    if (
+      transactionDateFilterMode === 'custom' &&
+      (!customTransactionDateFrom || !customTransactionDateTo)
+    ) {
+      setError('Pick both a "from" and "to" date for a custom transaction date range.');
       return null;
     }
 
@@ -153,7 +176,7 @@ export default function ReportBookedCustomers() {
     let query = supabase
       .from('bookings')
       .select(
-        'id, transaction_id, daily_sequence, admin_remark, reschedule_reason, player_name, player_phone, player_email, start_time, end_time, status, price, created_at, courts(name)'
+        'id, transaction_id, admin_remark, reschedule_reason, player_name, player_phone, player_email, start_time, end_time, status, price, created_at, transactions(confirmation_number), courts(name)'
       )
       .order('start_time', { ascending: false });
 
@@ -171,7 +194,6 @@ export default function ReportBookedCustomers() {
     type Raw = {
       id: string;
       transaction_id: number | null;
-      daily_sequence: number | null;
       admin_remark: string | null;
       reschedule_reason: string | null;
       player_name: string;
@@ -182,21 +204,27 @@ export default function ReportBookedCustomers() {
       status: BookingStatus;
       price: number | null;
       created_at: string;
+      transactions: { confirmation_number: string | null } | null;
       courts: { name: string } | null;
     };
 
     const result: ReportRow[] = ((data ?? []) as unknown as Raw[])
       .filter((b) => {
-        if (!range.from && !range.to) return true;
-        const bookingDate = bookingDatePH(b.start_time);
-        if (range.from && bookingDate < range.from) return false;
-        if (range.to && bookingDate > range.to) return false;
+        if (bookedRange.from || bookedRange.to) {
+          const bookingDate = datePH(b.start_time);
+          if (bookedRange.from && bookingDate < bookedRange.from) return false;
+          if (bookedRange.to && bookingDate > bookedRange.to) return false;
+        }
+        if (transactionRange.from || transactionRange.to) {
+          const transactionDate = datePH(b.created_at);
+          if (transactionRange.from && transactionDate < transactionRange.from) return false;
+          if (transactionRange.to && transactionDate > transactionRange.to) return false;
+        }
         return true;
       })
       .map((b) => ({
         id: b.id,
-        dailySequence: b.daily_sequence,
-        dateISO: bookingDatePH(b.start_time),
+        confirmationNumber: b.transactions?.confirmation_number ?? null,
         transactionDateTime: formatTransactionDateTime(b.created_at),
         playerName: b.player_name,
         playerPhone: b.player_phone,
@@ -234,8 +262,7 @@ export default function ReportBookedCustomers() {
     downloadCsv(
       `booked-customers-${todayPH()}.csv`,
       result.map((r) => ({
-        'Confirmation #':
-          r.dailySequence !== null ? formatConfirmationNumber(r.dailySequence, r.dateISO) : '',
+        'Confirmation #': r.confirmationNumber ?? '',
         'Transaction Date/Time': r.transactionDateTime,
         Player: r.playerName,
         Phone: r.playerPhone,
@@ -264,10 +291,25 @@ export default function ReportBookedCustomers() {
 
       <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 mb-3">
         <div>
-          <label className="block text-xs font-medium text-slate-500 mb-1">Date</label>
+          <label className="block text-xs font-medium text-slate-500 mb-1">Transaction Date</label>
           <select
-            value={dateFilterMode}
-            onChange={(e) => setDateFilterMode(e.target.value as DateFilterMode)}
+            value={transactionDateFilterMode}
+            onChange={(e) => setTransactionDateFilterMode(e.target.value as DateFilterMode)}
+            className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
+          >
+            <option value="all">All dates</option>
+            <option value="today">Today</option>
+            <option value="week">This week</option>
+            <option value="month">This month</option>
+            <option value="custom">Custom range…</option>
+          </select>
+        </div>
+
+        <div>
+          <label className="block text-xs font-medium text-slate-500 mb-1">Booked Date</label>
+          <select
+            value={bookedDateFilterMode}
+            onChange={(e) => setBookedDateFilterMode(e.target.value as DateFilterMode)}
             className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
           >
             <option value="all">All dates</option>
@@ -309,23 +351,52 @@ export default function ReportBookedCustomers() {
         </div>
       </div>
 
-      {dateFilterMode === 'custom' && (
+      {transactionDateFilterMode === 'custom' && (
         <div className="grid grid-cols-2 gap-3 mb-3 max-w-sm">
           <div>
-            <label className="block text-xs font-medium text-slate-500 mb-1">From</label>
+            <label className="block text-xs font-medium text-slate-500 mb-1">
+              Transaction date from
+            </label>
             <input
               type="date"
-              value={customDateFrom}
-              onChange={(e) => setCustomDateFrom(e.target.value)}
+              value={customTransactionDateFrom}
+              onChange={(e) => setCustomTransactionDateFrom(e.target.value)}
               className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
             />
           </div>
           <div>
-            <label className="block text-xs font-medium text-slate-500 mb-1">To</label>
+            <label className="block text-xs font-medium text-slate-500 mb-1">
+              Transaction date to
+            </label>
             <input
               type="date"
-              value={customDateTo}
-              onChange={(e) => setCustomDateTo(e.target.value)}
+              value={customTransactionDateTo}
+              onChange={(e) => setCustomTransactionDateTo(e.target.value)}
+              className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
+            />
+          </div>
+        </div>
+      )}
+
+      {bookedDateFilterMode === 'custom' && (
+        <div className="grid grid-cols-2 gap-3 mb-3 max-w-sm">
+          <div>
+            <label className="block text-xs font-medium text-slate-500 mb-1">
+              Booked date from
+            </label>
+            <input
+              type="date"
+              value={customBookedDateFrom}
+              onChange={(e) => setCustomBookedDateFrom(e.target.value)}
+              className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
+            />
+          </div>
+          <div>
+            <label className="block text-xs font-medium text-slate-500 mb-1">Booked date to</label>
+            <input
+              type="date"
+              value={customBookedDateTo}
+              onChange={(e) => setCustomBookedDateTo(e.target.value)}
               className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-emerald-500"
             />
           </div>
@@ -401,9 +472,7 @@ export default function ReportBookedCustomers() {
                         {row.playerEmail ?? '—'}
                       </td>
                       <td className="px-4 py-2.5 text-slate-600 whitespace-nowrap font-mono text-xs">
-                        {row.dailySequence !== null
-                          ? formatConfirmationNumber(row.dailySequence, row.dateISO)
-                          : '—'}
+                        {row.confirmationNumber ?? '—'}
                       </td>
                       <td className="px-4 py-2.5 text-slate-600 whitespace-nowrap">
                         {row.transactionDateTime}

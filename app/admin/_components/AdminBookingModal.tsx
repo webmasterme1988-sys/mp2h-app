@@ -51,6 +51,18 @@ export default function AdminBookingModal({
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  // Same live "past" clock as the public booking flow — grays out slots
+  // that have already started as the day goes on, without needing the
+  // admin to touch the date/court pickers to re-render.
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const interval = setInterval(
+      () => setNow(Date.now()),
+      settings.availability_refresh_seconds * 1000
+    );
+    return () => clearInterval(interval);
+  }, [settings.availability_refresh_seconds]);
+
   const timeSlots = useMemo(
     () => buildTimeSlots(settings.opening_hour, settings.closing_hour),
     [settings.opening_hour, settings.closing_hour]
@@ -140,8 +152,14 @@ export default function AdminBookingModal({
     return bookedTimes.has(new Date(slot.startISO(date)).getTime());
   }
 
+  function isSlotPast(hour: number) {
+    const slot = timeSlots.find((s) => s.hour === hour);
+    if (!slot) return false;
+    return new Date(slot.startISO(date)).getTime() <= now;
+  }
+
   function toggleHour(hour: number) {
-    if (isSlotTaken(hour)) return;
+    if (isSlotTaken(hour) || isSlotPast(hour)) return;
     setSelectedHours((prev) =>
       prev.includes(hour) ? prev.filter((h) => h !== hour) : [...prev, hour].sort((a, b) => a - b)
     );
@@ -301,12 +319,13 @@ export default function AdminBookingModal({
               <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5">
                 {timeSlots.map((slot) => {
                   const taken = isSlotTaken(slot.hour);
+                  const past = !taken && isSlotPast(slot.hour);
                   const selected = selectedHours.includes(slot.hour);
                   return (
                     <button
                       key={slot.hour}
                       type="button"
-                      disabled={taken}
+                      disabled={taken || past}
                       onClick={() => toggleHour(slot.hour)}
                       style={
                         selected
@@ -314,15 +333,15 @@ export default function AdminBookingModal({
                           : undefined
                       }
                       className={`rounded-xl border px-3 py-3 text-sm font-medium text-center transition-colors ${
-                        taken
+                        taken || past
                           ? 'bg-slate-100 border-slate-200 text-slate-400 cursor-not-allowed line-through'
                           : selected
                           ? 'text-[var(--admin-btn-label)]'
                           : 'bg-white border-slate-300 text-slate-700 hover:border-emerald-400'
                       }`}
                     >
-                      {slot.label}
-                      {!taken && settings.show_price && (
+                      {past ? 'Past' : slot.label}
+                      {!taken && !past && settings.show_price && (
                         <span className="block text-xs mt-0.5 opacity-80">
                           {formatPrice(
                             getSlotPrice(slot.hour, settings.pricing_mode, settings.flat_price, priceTiers)

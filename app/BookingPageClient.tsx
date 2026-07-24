@@ -10,7 +10,7 @@ import { type Holiday } from '@/lib/holidays';
 import { compressImage } from '@/lib/compressImage';
 import { getSlotPrice, formatPrice, type PriceTier } from '@/lib/priceTiers';
 import { fetchActiveAddons, type Addon } from '@/lib/addons';
-import { formatConfirmationNumber, formatReferenceNumber } from '@/lib/confirmationCode';
+import { formatReferenceNumber } from '@/lib/confirmationCode';
 import { hasSlotConflict } from '@/lib/slotAvailability';
 import CopyableCode from '@/components/CopyableCode';
 
@@ -81,7 +81,7 @@ export default function BookingPageClient({
   const [submitState, setSubmitState] = useState<SubmitState>('idle');
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [lastTransactionId, setLastTransactionId] = useState<number | null>(null);
-  const [lastDailySequence, setLastDailySequence] = useState<number | null>(null);
+  const [lastConfirmationNumber, setLastConfirmationNumber] = useState<string | null>(null);
   const [lastBookingStatus, setLastBookingStatus] = useState<'pending' | 'confirmed'>('pending');
 
   // ---------- Add-ons ----------
@@ -597,7 +597,7 @@ export default function BookingPageClient({
       const { data: transaction, error: transactionError } = await supabase
         .from('transactions')
         .insert({})
-        .select('id')
+        .select('id, confirmation_number')
         .single();
 
       if (transactionError) {
@@ -627,7 +627,7 @@ export default function BookingPageClient({
             price: getPrice(slot.hour),
           }))
         )
-        .select('id, daily_sequence');
+        .select('id');
 
       if (insertError) {
         throw new Error(`Booking could not be saved: ${insertError.message}`);
@@ -658,7 +658,7 @@ export default function BookingPageClient({
       }
 
       setLastTransactionId(transaction.id);
-      setLastDailySequence(insertedBookings?.[0]?.daily_sequence ?? null);
+      setLastConfirmationNumber(transaction.confirmation_number ?? null);
       setLastBookingStatus(bookingStatus);
       setSubmitState('success');
       // Superseded by the real booking rows above — release rather than
@@ -907,11 +907,11 @@ export default function BookingPageClient({
 
                   {lastTransactionId !== null && (
                     <div className="rounded-xl bg-slate-50 border border-slate-200 p-4 text-sm space-y-2 mb-3">
-                      {lastDailySequence !== null && (
+                      {lastConfirmationNumber !== null && (
                         <CopyableCode
                           icon="ticket"
                           label="Confirmation #"
-                          value={formatConfirmationNumber(lastDailySequence, selectedDate)}
+                          value={lastConfirmationNumber}
                         />
                       )}
                       <CopyableCode

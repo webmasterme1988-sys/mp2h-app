@@ -1,6 +1,6 @@
 import { formatPrice } from './priceTiers';
 import { normalizeRichText } from './richText';
-import { formatConfirmationNumber, formatReferenceNumber } from './confirmationCode';
+import { formatReferenceNumber } from './confirmationCode';
 
 export interface CustomerEmailSlot {
   timeRange: string; // e.g. "4:00 PM to 5:00 PM"
@@ -11,10 +11,9 @@ export interface CustomerEmailParams {
   playerName: string;
   playerPhone: string;
   transactionId: number | null;
-  dailySequence: number | null; // bookings.daily_sequence — used to build Confirmation #
+  confirmationNumber: string | null; // transactions.confirmation_number
   courtName: string;
   dateLabel: string; // e.g. "Jul 22, 2026"
-  bookingDateISO: string; // "YYYY-MM-DD", Philippine time — used to build Confirmation #
   slots: CustomerEmailSlot[];
   totalHours: number;
   totalPrice: number | null; // null = don't show a total line at all
@@ -61,10 +60,9 @@ export function buildCustomerConfirmationEmail(
     playerName,
     playerPhone,
     transactionId,
-    dailySequence,
+    confirmationNumber,
     courtName,
     dateLabel,
-    bookingDateISO,
     slots,
     totalHours,
     totalPrice,
@@ -77,8 +75,6 @@ export function buildCustomerConfirmationEmail(
   // which would otherwise still print an empty footer/divider.
   const footerHtml = params.footerHtml ? normalizeRichText(params.footerHtml) : null;
 
-  const confirmationNumber =
-    dailySequence !== null ? formatConfirmationNumber(dailySequence, bookingDateISO) : null;
   const referenceNumber = transactionId !== null ? formatReferenceNumber(transactionId) : null;
 
   // ---------- Plain text (fallback for clients that don't render HTML) ----------

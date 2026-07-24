@@ -10,7 +10,6 @@ import { getDirectionsUrl } from '@/lib/googleMaps';
 interface NotifyBookingRow {
   id: string;
   transaction_id: number | null;
-  daily_sequence: number | null;
   admin_remark: string | null;
   player_name: string;
   player_phone: string;
@@ -20,6 +19,8 @@ interface NotifyBookingRow {
   status: string;
   receipt_url: string | null;
   price: number | null;
+  created_at: string;
+  transactions: { confirmation_number: string | null } | null;
   courts: { name: string } | null;
 }
 
@@ -37,7 +38,7 @@ export async function POST(request: NextRequest) {
   const { data, error } = await supabase
     .from('bookings')
     .select(
-      'id, transaction_id, daily_sequence, admin_remark, player_name, player_phone, player_email, start_time, end_time, status, receipt_url, price, courts(name)'
+      'id, transaction_id, admin_remark, player_name, player_phone, player_email, start_time, end_time, status, receipt_url, price, created_at, transactions(confirmation_number), courts(name)'
     )
     .in('id', bookingIds)
     .order('start_time', { ascending: true });
@@ -176,12 +177,9 @@ export async function POST(request: NextRequest) {
         playerName: first.player_name,
         playerPhone: first.player_phone,
         transactionId: first.transaction_id,
-        dailySequence: first.daily_sequence,
+        confirmationNumber: first.transactions?.confirmation_number ?? null,
         courtName,
         dateLabel: formatDate(first.start_time),
-        bookingDateISO: new Date(first.start_time).toLocaleDateString('en-CA', {
-          timeZone: 'Asia/Manila',
-        }),
         slots: bookings.map((b) => ({
           timeRange: formatSlotRange(b.start_time, b.end_time),
           price: b.price,

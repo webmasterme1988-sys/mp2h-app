@@ -962,7 +962,7 @@ export default function BookingPageClient({
                     )}
                     {settings.show_price && (
                       <div className="flex justify-between font-semibold text-slate-800">
-                        <span>Total Paid</span>
+                        <span>Total Amount</span>
                         <span>{formatPrice(totalPrice)}</span>
                       </div>
                     )}

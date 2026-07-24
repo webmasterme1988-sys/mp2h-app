@@ -25,18 +25,21 @@ export interface EmailCredentials {
   gmailUser: string;
   gmailAppPassword: string;
   adminNotificationEmail: string;
+  // Shared secret the Supabase pg_cron job presents to authenticate itself
+  // to /api/cron/send-reminders — null if the admin hasn't set one yet.
+  cronSecret: string | null;
 }
 
-// Reads the actual secret, so this must only ever be called with a
+// Reads the actual secrets, so this must only ever be called with a
 // service-role client — the admin-dashboard (authenticated) role can see
-// that a password is configured but is deliberately blocked at the
-// database level from reading its value back out.
+// that a password/secret is configured but is deliberately blocked at the
+// database level from reading the values back out.
 export async function fetchEmailCredentials(
   supabaseAdmin: SupabaseClient
 ): Promise<EmailCredentials | null> {
   const { data, error } = await supabaseAdmin
     .from('email_settings')
-    .select('gmail_user, gmail_app_password, admin_notification_email')
+    .select('gmail_user, gmail_app_password, admin_notification_email, cron_secret')
     .eq('id', 1)
     .maybeSingle();
 
@@ -49,5 +52,6 @@ export async function fetchEmailCredentials(
     gmailUser: data.gmail_user ?? '',
     gmailAppPassword: data.gmail_app_password ?? '',
     adminNotificationEmail: data.admin_notification_email ?? '',
+    cronSecret: data.cron_secret ?? null,
   };
 }

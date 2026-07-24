@@ -38,6 +38,19 @@ export default function PricingTab() {
     DEFAULT_SITE_SETTINGS.attach_receipt_to_customer_email
   );
 
+  const [reminder1Enabled, setReminder1Enabled] = useState(
+    DEFAULT_SITE_SETTINGS.booking_reminder_1_enabled
+  );
+  const [reminder1Hours, setReminder1Hours] = useState(
+    DEFAULT_SITE_SETTINGS.booking_reminder_1_hours
+  );
+  const [reminder2Enabled, setReminder2Enabled] = useState(
+    DEFAULT_SITE_SETTINGS.booking_reminder_2_enabled
+  );
+  const [reminder2Hours, setReminder2Hours] = useState(
+    DEFAULT_SITE_SETTINGS.booking_reminder_2_hours
+  );
+
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState(false);
@@ -66,6 +79,10 @@ export default function PricingTab() {
       setAttachMarketingImage(loaded.attach_marketing_image);
       setEmailFooterHtml(loaded.customer_email_footer_html ?? '');
       setAttachReceiptToCustomerEmail(loaded.attach_receipt_to_customer_email);
+      setReminder1Enabled(loaded.booking_reminder_1_enabled);
+      setReminder1Hours(loaded.booking_reminder_1_hours);
+      setReminder2Enabled(loaded.booking_reminder_2_enabled);
+      setReminder2Hours(loaded.booking_reminder_2_hours);
       setLoading(false);
     });
   }, []);
@@ -96,6 +113,14 @@ export default function PricingTab() {
 
     if (flatPrice < 0) {
       setError('Price cannot be negative.');
+      return;
+    }
+    if (reminder1Enabled && (!Number.isInteger(reminder1Hours) || reminder1Hours < 1)) {
+      setError('Reminder 1 must be a whole number of hours, at least 1.');
+      return;
+    }
+    if (reminder2Enabled && (!Number.isInteger(reminder2Hours) || reminder2Hours < 1)) {
+      setError('Reminder 2 must be a whole number of hours, at least 1.');
       return;
     }
 
@@ -131,6 +156,10 @@ export default function PricingTab() {
       marketing_image_url: marketingImageUrl,
       customer_email_footer_html: normalizeRichText(emailFooterHtml),
       attach_receipt_to_customer_email: attachReceiptToCustomerEmail,
+      booking_reminder_1_enabled: reminder1Enabled,
+      booking_reminder_1_hours: reminder1Hours,
+      booking_reminder_2_enabled: reminder2Enabled,
+      booking_reminder_2_hours: reminder2Hours,
     });
 
     if (upsertError) {
@@ -393,6 +422,66 @@ export default function PricingTab() {
                 </div>
               </div>
             )}
+
+            <div className="rounded-xl border border-slate-200 p-4 space-y-4">
+              <div>
+                <span className="block text-sm font-medium text-slate-700">Booking Reminders</span>
+                <span className="block text-xs text-slate-500 mt-0.5">
+                  Automatically email customers a reminder before their confirmed booking starts.
+                  Requires the Gmail settings above to be configured, and a scheduled job set up
+                  in Supabase to trigger the check periodically — see the setup SQL provided
+                  separately.
+                </span>
+              </div>
+
+              <label className="flex items-start gap-3 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={reminder1Enabled}
+                  onChange={(e) => setReminder1Enabled(e.target.checked)}
+                  className="mt-0.5 h-4 w-4 rounded border-slate-300 text-emerald-600 focus:ring-emerald-500"
+                />
+                <span className="flex items-center gap-2 flex-wrap text-sm text-slate-700">
+                  <span>Send a reminder</span>
+                  <input
+                    type="number"
+                    min={1}
+                    max={168}
+                    step={1}
+                    value={reminder1Hours}
+                    disabled={!reminder1Enabled}
+                    onChange={(e) => setReminder1Hours(Number(e.target.value))}
+                    onClick={(e) => e.stopPropagation()}
+                    className="w-16 rounded-lg border border-slate-300 px-2 py-1 text-sm disabled:bg-slate-50 disabled:text-slate-400"
+                  />
+                  <span>hours before the booking starts</span>
+                </span>
+              </label>
+
+              <label className="flex items-start gap-3 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={reminder2Enabled}
+                  onChange={(e) => setReminder2Enabled(e.target.checked)}
+                  className="mt-0.5 h-4 w-4 rounded border-slate-300 text-emerald-600 focus:ring-emerald-500"
+                />
+                <span className="flex items-center gap-2 flex-wrap text-sm text-slate-700">
+                  <span>Send a reminder</span>
+                  <input
+                    type="number"
+                    min={1}
+                    max={168}
+                    step={1}
+                    value={reminder2Hours}
+                    disabled={!reminder2Enabled}
+                    onChange={(e) => setReminder2Hours(Number(e.target.value))}
+                    onClick={(e) => e.stopPropagation()}
+                    className="w-16 rounded-lg border border-slate-300 px-2 py-1 text-sm disabled:bg-slate-50 disabled:text-slate-400"
+                  />
+                  <span>hours before the booking starts</span>
+                </span>
+              </label>
+            </div>
 
             <label className="flex items-start gap-3 cursor-pointer">
               <input

@@ -404,11 +404,19 @@ function EmailNotificationsSection() {
   const [gmailUser, setGmailUser] = useState('');
   const [adminNotificationEmail, setAdminNotificationEmail] = useState('');
   const [appPassword, setAppPassword] = useState('');
+  const [cronSecret, setCronSecret] = useState('');
+  const [copiedCronSecret, setCopiedCronSecret] = useState(false);
 
   const [saving, setSaving] = useState(false);
   const [clearing, setClearing] = useState(false);
+  const [clearingCronSecret, setClearingCronSecret] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState(false);
+
+  const [testingEmail, setTestingEmail] = useState(false);
+  const [testEmailResult, setTestEmailResult] = useState<
+    { ok: true; to: string } | { ok: false; message: string } | null
+  >(null);
 
   const loadSettings = useCallback(async () => {
     setLoading(true);
@@ -417,8 +425,25 @@ function EmailNotificationsSection() {
     setGmailUser(loaded.gmailUser);
     setAdminNotificationEmail(loaded.adminNotificationEmail);
     setAppPassword('');
+    setCronSecret('');
     setLoading(false);
   }, []);
+
+  function generateCronSecret() {
+    const bytes = new Uint8Array(32);
+    crypto.getRandomValues(bytes);
+    setCronSecret(Array.from(bytes).map((b) => b.toString(16).padStart(2, '0')).join(''));
+  }
+
+  async function copyCronSecret() {
+    try {
+      await navigator.clipboard.writeText(cronSecret);
+      setCopiedCronSecret(true);
+      setTimeout(() => setCopiedCronSecret(false), 1500);
+    } catch (err) {
+      console.error('Failed to copy cron secret:', err);
+    }
+  }
 
   useEffect(() => {
     loadSettings();
@@ -454,6 +479,10 @@ function EmailNotificationsSection() {
     if (appPassword.trim()) {
       update.gmail_app_password = appPassword.trim();
       update.app_password_set = true;
+    }
+    if (cronSecret.trim()) {
+      update.cron_secret = cronSecret.trim();
+      update.cron_secret_set = true;
     }
 
     const { error: updateError } = await supabase
@@ -493,6 +522,55 @@ function EmailNotificationsSection() {
 
     setClearing(false);
     await loadSettings();
+  }
+
+  async function handleClearCronSecret() {
+    if (
+      !window.confirm(
+        'Clear the saved cron secret? Scheduled reminder emails will stop working until a new one is set here and the Supabase scheduled job picks it up.'
+      )
+    ) {
+      return;
+    }
+
+    setClearingCronSecret(true);
+    setError(null);
+
+    const { error: updateError } = await supabase
+      .from('email_settings')
+      .update({ cron_secret: null, cron_secret_set: false })
+      .eq('id', 1);
+
+    if (updateError) {
+      setError(updateError.message);
+      setClearingCronSecret(false);
+      return;
+    }
+
+    setClearingCronSecret(false);
+    await loadSettings();
+  }
+
+  async function handleSendTestEmail() {
+    setTestingEmail(true);
+    setTestEmailResult(null);
+
+    try {
+      const res = await fetch('/api/admin/test-email', { method: 'POST' });
+      const body = await res.json().catch(() => ({}));
+      if (!res.ok) {
+        setTestEmailResult({ ok: false, message: body.error ?? 'Could not send test email.' });
+      } else {
+        setTestEmailResult({ ok: true, to: body.to });
+      }
+    } catch (err) {
+      setTestEmailResult({
+        ok: false,
+        message: err instanceof Error ? err.message : 'Could not send test email.',
+      });
+    } finally {
+      setTestingEmail(false);
+    }
   }
 
   return (
@@ -572,16 +650,95 @@ function EmailNotificationsSection() {
             />
           </div>
 
+          <div>
+            <label className="block text-sm font-medium text-slate-600 mb-1">
+              Cron Secret{' '}
+              <span className="text-slate-400 font-normal">
+                ({settings.cronSecretSet ? 'currently set — leave blank to keep it' : 'not set yet'})
+              </span>
+            </label>
+            <p className="text-xs text-slate-500 mb-2">
+              Authorizes the scheduled job (set up in Supabase) that sends booking reminder
+              emails to call this app. Click Generate, save, then follow the Supabase setup
+              instructions — the scheduled job reads this value live from the database, so
+              regenerating it later doesn&apos;t require updating anything else.
+            </p>
+            <div className="flex gap-2">
+              <input
+                type="text"
+                value={cronSecret}
+                onChange={(e) => setCronSecret(e.target.value)}
+                placeholder={
+                  settings.cronSecretSet ? '••••••••••••••••••••••••••••••••' : 'Click Generate'
+                }
+                autoComplete="off"
+                className="flex-1 min-w-0 rounded-xl border border-slate-300 px-3 py-2.5 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-emerald-500"
+              />
+              <button
+                type="button"
+                onClick={generateCronSecret}
+                className="shrink-0 rounded-xl bg-slate-100 text-slate-700 border border-slate-200 text-sm font-medium px-4 hover:bg-slate-200 transition-colors"
+              >
+                Generate
+              </button>
+              {cronSecret && (
+                <button
+                  type="button"
+                  onClick={copyCronSecret}
+                  className="shrink-0 rounded-xl bg-slate-100 text-slate-700 border border-slate-200 text-sm font-medium px-4 hover:bg-slate-200 transition-colors"
+                >
+                  {copiedCronSecret ? 'Copied!' : 'Copy'}
+                </button>
+              )}
+            </div>
+            {cronSecret && (
+              <p className="text-xs text-amber-600 mt-1.5">
+                Copy this now — after you save, it won&apos;t be shown again.
+              </p>
+            )}
+            {settings.cronSecretSet && (
+              <button
+                type="button"
+                onClick={handleClearCronSecret}
+                disabled={clearingCronSecret}
+                className="mt-1.5 text-xs text-red-600 hover:text-red-700 underline underline-offset-2 disabled:opacity-50"
+              >
+                {clearingCronSecret ? 'Clearing…' : 'Clear saved cron secret'}
+              </button>
+            )}
+          </div>
+
           {error && <p className="text-sm text-red-600">{error}</p>}
           {success && <p className="text-sm text-emerald-600">Saved.</p>}
 
-          <button
-            type="submit"
-            disabled={saving}
-            className="rounded-xl bg-[var(--admin-btn-bg)] text-[var(--admin-btn-label)] font-medium px-6 py-2.5 text-sm hover:brightness-90 disabled:opacity-60 disabled:cursor-not-allowed transition-colors"
-          >
-            {saving ? 'Saving…' : 'Save Changes'}
-          </button>
+          <div className="flex flex-wrap items-center gap-3">
+            <button
+              type="submit"
+              disabled={saving}
+              className="rounded-xl bg-[var(--admin-btn-bg)] text-[var(--admin-btn-label)] font-medium px-6 py-2.5 text-sm hover:brightness-90 disabled:opacity-60 disabled:cursor-not-allowed transition-colors"
+            >
+              {saving ? 'Saving…' : 'Save Changes'}
+            </button>
+            <button
+              type="button"
+              onClick={handleSendTestEmail}
+              disabled={testingEmail || !settings.appPasswordSet}
+              title={
+                settings.appPasswordSet ? undefined : 'Save a Gmail Address and App Password first.'
+              }
+              className="rounded-xl bg-slate-100 text-slate-700 border border-slate-200 font-medium px-6 py-2.5 text-sm hover:bg-slate-200 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+            >
+              {testingEmail ? 'Sending…' : 'Send Test Email'}
+            </button>
+          </div>
+
+          {testEmailResult && (
+            <p className={`text-sm ${testEmailResult.ok ? 'text-emerald-600' : 'text-red-600'}`}>
+              {testEmailResult.ok
+                ? `Test email sent to ${testEmailResult.to}. Check the inbox (and spam folder).`
+                : testEmailResult.message}
+            </p>
+          )}
         </form>
       )}
     </section>

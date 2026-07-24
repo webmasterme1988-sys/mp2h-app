@@ -35,6 +35,10 @@ export interface SiteSettings {
   marketing_image_url: string | null;
   customer_email_footer_html: string | null;
   attach_receipt_to_customer_email: boolean;
+  booking_reminder_1_enabled: boolean;
+  booking_reminder_1_hours: number;
+  booking_reminder_2_enabled: boolean;
+  booking_reminder_2_hours: number;
   admin_tab_font_color: string;
   admin_tab_active_bg_color: string;
   landing_tagline: string | null;
@@ -88,6 +92,13 @@ export const DEFAULT_SITE_SETTINGS: SiteSettings = {
   marketing_image_url: null,
   customer_email_footer_html: null,
   attach_receipt_to_customer_email: false,
+  // Off by default — enabling requires the admin to explicitly opt in from
+  // the dashboard, same as notify_customer_on_approval above, rather than
+  // silently start emailing customers the moment the cron job is wired up.
+  booking_reminder_1_enabled: false,
+  booking_reminder_1_hours: 24,
+  booking_reminder_2_enabled: false,
+  booking_reminder_2_hours: 4,
   admin_tab_font_color: '#475569', // Tailwind slate-600
   admin_tab_active_bg_color: '#059669', // Tailwind emerald-600
   landing_tagline: null,
@@ -109,7 +120,7 @@ export const DEFAULT_SITE_SETTINGS: SiteSettings = {
 };
 
 const SITE_SETTINGS_COLUMNS =
-  'site_title, site_subtitle, logo_url, logo_height, primary_color, selection_color, button_bg_color, button_label_color, submit_button_label, gcash_qr_url, payment_note, opening_hour, closing_hour, open_days, pending_hold_minutes, checkout_hold_minutes, availability_refresh_seconds, booking_hold_warning_text, auto_confirm_bookings, allow_multi_slot_booking, show_price, pricing_mode, flat_price, notify_customer_on_approval, attach_marketing_image, marketing_image_url, customer_email_footer_html, attach_receipt_to_customer_email, admin_tab_font_color, admin_tab_active_bg_color, landing_tagline, landing_about_html, landing_policy_html, landing_address, landing_contact_phone, landing_contact_email, landing_facebook_url, landing_instagram_url, landing_google_maps_url, landing_facebook_page_id, landing_enable_fb_chat, landing_show_gallery, landing_tiktok_url, landing_youtube_url, landing_twitter_url, landing_whatsapp_number';
+  'site_title, site_subtitle, logo_url, logo_height, primary_color, selection_color, button_bg_color, button_label_color, submit_button_label, gcash_qr_url, payment_note, opening_hour, closing_hour, open_days, pending_hold_minutes, checkout_hold_minutes, availability_refresh_seconds, booking_hold_warning_text, auto_confirm_bookings, allow_multi_slot_booking, show_price, pricing_mode, flat_price, notify_customer_on_approval, attach_marketing_image, marketing_image_url, customer_email_footer_html, attach_receipt_to_customer_email, booking_reminder_1_enabled, booking_reminder_1_hours, booking_reminder_2_enabled, booking_reminder_2_hours, admin_tab_font_color, admin_tab_active_bg_color, landing_tagline, landing_about_html, landing_policy_html, landing_address, landing_contact_phone, landing_contact_email, landing_facebook_url, landing_instagram_url, landing_google_maps_url, landing_facebook_page_id, landing_enable_fb_chat, landing_show_gallery, landing_tiktok_url, landing_youtube_url, landing_twitter_url, landing_whatsapp_number';
 
 // Branding is a nice-to-have, not core booking functionality — if the table
 // isn't set up yet or the query fails for any reason, fall back to defaults

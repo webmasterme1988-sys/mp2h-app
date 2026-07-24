@@ -2,6 +2,7 @@ import { NextResponse, type NextRequest } from 'next/server';
 import { cookies } from 'next/headers';
 import { createServerClient } from '@supabase/ssr';
 import { getSupabaseAdmin } from '@/lib/supabase/admin';
+import { clearReceiptsBucket } from '@/lib/supabase/receiptsCleanup';
 
 type SupabaseAdmin = ReturnType<typeof getSupabaseAdmin>;
 
@@ -91,31 +92,4 @@ export async function POST(request: NextRequest) {
   }
 
   return NextResponse.json(summary);
-}
-
-async function clearReceiptsBucket(admin: SupabaseAdmin) {
-  const { data: topLevel, error } = await admin.storage.from('receipts').list('', { limit: 1000 });
-  if (error) throw error;
-
-  const paths: string[] = [];
-  for (const entry of topLevel ?? []) {
-    if (entry.id === null) {
-      // A "folder" (our upload paths are `${date}/filename`) — list one level deep.
-      const { data: inner, error: innerError } = await admin.storage
-        .from('receipts')
-        .list(entry.name, { limit: 1000 });
-      if (innerError) throw innerError;
-      for (const file of inner ?? []) {
-        paths.push(`${entry.name}/${file.name}`);
-      }
-    } else {
-      paths.push(entry.name);
-    }
-  }
-
-  if (paths.length === 0) return 0;
-
-  const { error: removeError } = await admin.storage.from('receipts').remove(paths);
-  if (removeError) throw removeError;
-  return paths.length;
 }

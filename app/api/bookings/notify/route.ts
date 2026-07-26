@@ -78,8 +78,16 @@ export async function POST(request: NextRequest) {
   // Node.js functions default to UTC), not in the customer's or admin's
   // browser, so leaving it implicit silently shows UTC instead of the
   // Philippine time the slot was actually booked for.
+  // `dateStyle` can't be mixed with individual component options like
+  // `weekday`, hence spelling out month/day/year explicitly here.
   const formatDate = (iso: string) =>
-    new Date(iso).toLocaleDateString('en-US', { dateStyle: 'medium', timeZone: 'Asia/Manila' });
+    new Date(iso).toLocaleDateString('en-US', {
+      weekday: 'short',
+      month: 'short',
+      day: 'numeric',
+      year: 'numeric',
+      timeZone: 'Asia/Manila',
+    });
   // "9:00 AM to 10:00 AM" — the actual booked slot, not just its start time.
   const formatSlotRange = (startIso: string, endIso: string) => {
     const fmt = (iso: string) =>

@@ -70,10 +70,11 @@ function formatDateTime(iso: string) {
   });
 }
 
-// "Jul 24, 2026" — pinned to Philippine time so the booked court date shows
-// correctly regardless of what timezone the admin's browser is in.
+// "Mon, Jul 24, 2026" — pinned to Philippine time so the booked court date
+// shows correctly regardless of what timezone the admin's browser is in.
 function formatDateOnly(iso: string) {
   return new Date(iso).toLocaleDateString('en-US', {
+    weekday: 'short',
     month: 'short',
     day: 'numeric',
     year: 'numeric',

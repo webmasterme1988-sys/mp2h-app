@@ -71,8 +71,16 @@ export async function POST(request: NextRequest) {
 
   // Must pin the timezone explicitly — this runs on the server (Vercel's
   // Node.js functions default to UTC), not in the customer's browser.
+  // `dateStyle` can't be mixed with individual component options like
+  // `weekday`, hence spelling out month/day/year explicitly here.
   const formatDate = (iso: string) =>
-    new Date(iso).toLocaleDateString('en-US', { dateStyle: 'medium', timeZone: 'Asia/Manila' });
+    new Date(iso).toLocaleDateString('en-US', {
+      weekday: 'short',
+      month: 'short',
+      day: 'numeric',
+      year: 'numeric',
+      timeZone: 'Asia/Manila',
+    });
   const formatSlotRange = (startIso: string, endIso: string) => {
     const fmt = (iso: string) =>
       new Date(iso).toLocaleTimeString('en-US', {

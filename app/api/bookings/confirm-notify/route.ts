@@ -107,8 +107,13 @@ export async function POST(request: NextRequest) {
   }
 
   const courtName = booking.courts?.name ?? 'your court';
+  // `dateStyle` can't be mixed with individual component options like
+  // `weekday`, hence spelling out month/day/year explicitly here.
   const dateLabel = new Date(booking.start_time).toLocaleDateString('en-US', {
-    dateStyle: 'medium',
+    weekday: 'short',
+    month: 'short',
+    day: 'numeric',
+    year: 'numeric',
     timeZone: 'Asia/Manila',
   });
   // "9:00 AM to 10:00 AM" — the actual booked slot, not just its start time.

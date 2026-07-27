@@ -40,6 +40,7 @@ interface Booking {
 interface Court {
   id: string;
   name: string;
+  is_active: boolean;
 }
 
 interface TransactionGroup {
@@ -229,8 +230,8 @@ export default function BookingsTab() {
     fetchPriceTiers(supabase).then(setPriceTiers);
     supabase
       .from('courts')
-      .select('id, name')
-      .order('id')
+      .select('id, name, is_active')
+      .order('sort_order')
       .then(({ data, error }) => {
         if (error) {
           console.error('Failed to load courts:', error);
@@ -843,6 +844,7 @@ export default function BookingsTab() {
               {courts.map((court) => (
                 <option key={court.id} value={court.id}>
                   {court.name}
+                  {court.is_active ? '' : ' (disabled)'}
                 </option>
               ))}
             </select>
@@ -1438,7 +1440,7 @@ export default function BookingsTab() {
         <AdminBookingModal
           settings={settings}
           priceTiers={priceTiers}
-          courts={courts}
+          courts={courts.filter((c) => c.is_active)}
           onClose={() => setAdminBookingModalOpen(false)}
           onBooked={fetchBookings}
         />

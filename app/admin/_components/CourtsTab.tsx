@@ -8,6 +8,9 @@ interface Court {
   id: string;
   name: string;
   image_url: string | null;
+  is_active: boolean;
+  show_when_disabled: boolean;
+  sort_order: number;
 }
 
 export default function CourtsTab() {
@@ -19,6 +22,7 @@ export default function CourtsTab() {
   const [uploadingImageId, setUploadingImageId] = useState<string | null>(null);
   const [newCourtName, setNewCourtName] = useState('');
   const [addingCourt, setAddingCourt] = useState(false);
+  const [reorderingId, setReorderingId] = useState<string | null>(null);
   const imageInputRefs = useRef<Record<string, HTMLInputElement | null>>({});
 
   // ---------- Delete-with-history confirmation ----------
@@ -33,7 +37,10 @@ export default function CourtsTab() {
     setCourtsLoading(true);
     setCourtsError(null);
 
-    const { data, error } = await supabase.from('courts').select('id, name, image_url').order('id');
+    const { data, error } = await supabase
+      .from('courts')
+      .select('id, name, image_url, is_active, show_when_disabled, sort_order')
+      .order('sort_order');
 
     if (error) {
       console.error('Failed to load courts:', error);
@@ -59,7 +66,13 @@ export default function CourtsTab() {
     setAddingCourt(true);
     setCourtsError(null);
 
-    const { error } = await supabase.from('courts').insert({ name });
+    // New courts go to the end of the list rather than relying on a DB
+    // default, so they don't jump ahead of existing courts in whatever
+    // order the admin has already arranged.
+    const nextSortOrder =
+      courts.length > 0 ? Math.max(...courts.map((c) => c.sort_order)) + 1 : 0;
+
+    const { error } = await supabase.from('courts').insert({ name, sort_order: nextSortOrder });
 
     if (error) {
       console.error('Failed to add court:', error);
@@ -70,6 +83,76 @@ export default function CourtsTab() {
 
     setNewCourtName('');
     setAddingCourt(false);
+    await fetchCourts();
+  }
+
+  async function handleToggleActive(court: Court) {
+    setSavingCourtId(court.id);
+    setCourtsError(null);
+
+    const { error } = await supabase
+      .from('courts')
+      .update({ is_active: !court.is_active })
+      .eq('id', court.id);
+
+    if (error) {
+      console.error(`Failed to update court ${court.id}:`, error);
+      setCourtsError(`Could not update court: ${error.message}`);
+      setSavingCourtId(null);
+      return;
+    }
+
+    setSavingCourtId(null);
+    await fetchCourts();
+  }
+
+  async function handleToggleShowWhenDisabled(court: Court) {
+    setSavingCourtId(court.id);
+    setCourtsError(null);
+
+    const { error } = await supabase
+      .from('courts')
+      .update({ show_when_disabled: !court.show_when_disabled })
+      .eq('id', court.id);
+
+    if (error) {
+      console.error(`Failed to update court ${court.id}:`, error);
+      setCourtsError(`Could not update court: ${error.message}`);
+      setSavingCourtId(null);
+      return;
+    }
+
+    setSavingCourtId(null);
+    await fetchCourts();
+  }
+
+  // `courts` is already sorted by sort_order ascending, so the adjacent
+  // court in the array is exactly the one to swap with.
+  async function handleMoveCourt(courtId: string, direction: 'up' | 'down') {
+    const index = courts.findIndex((c) => c.id === courtId);
+    if (index === -1) return;
+    const swapIndex = direction === 'up' ? index - 1 : index + 1;
+    if (swapIndex < 0 || swapIndex >= courts.length) return;
+
+    const current = courts[index];
+    const swapWith = courts[swapIndex];
+
+    setReorderingId(courtId);
+    setCourtsError(null);
+
+    const [{ error: error1 }, { error: error2 }] = await Promise.all([
+      supabase.from('courts').update({ sort_order: swapWith.sort_order }).eq('id', current.id),
+      supabase.from('courts').update({ sort_order: current.sort_order }).eq('id', swapWith.id),
+    ]);
+
+    if (error1 || error2) {
+      console.error('Failed to reorder courts:', error1 ?? error2);
+      setCourtsError(`Could not reorder courts: ${(error1 ?? error2)?.message}`);
+      setReorderingId(null);
+      return;
+    }
+
+    setReorderingId(null);
     await fetchCourts();
   }
 
@@ -322,14 +405,33 @@ export default function CourtsTab() {
           {courts.length === 0 && (
             <p className="text-sm text-slate-400">No courts yet — add one below.</p>
           )}
-          {courts.map((court) => {
+          {courts.map((court, index) => {
             const draftName = courtEdits[court.id] ?? court.name;
             const isSaving = savingCourtId === court.id;
             const isChecking = checkingCourtId === court.id;
             const isUploadingImage = uploadingImageId === court.id;
+            const isReordering = reorderingId !== null;
             return (
               <div key={court.id} className="rounded-xl border border-slate-200 p-3">
                 <div className="flex items-center gap-2 mb-3">
+                  <div className="flex flex-col shrink-0">
+                    <button
+                      onClick={() => handleMoveCourt(court.id, 'up')}
+                      disabled={isReordering || index === 0}
+                      aria-label={`Move ${court.name} up`}
+                      className="text-slate-400 hover:text-slate-700 disabled:opacity-30 disabled:cursor-not-allowed leading-none px-1"
+                    >
+                      ▲
+                    </button>
+                    <button
+                      onClick={() => handleMoveCourt(court.id, 'down')}
+                      disabled={isReordering || index === courts.length - 1}
+                      aria-label={`Move ${court.name} down`}
+                      className="text-slate-400 hover:text-slate-700 disabled:opacity-30 disabled:cursor-not-allowed leading-none px-1"
+                    >
+                      ▼
+                    </button>
+                  </div>
                   <input
                     type="text"
                     value={draftName}
@@ -354,6 +456,49 @@ export default function CourtsTab() {
                     {isChecking ? 'Checking…' : 'Delete'}
                   </button>
                 </div>
+
+                <div className="flex items-center gap-2 mb-3">
+                  <span
+                    className={`inline-block rounded-full px-2.5 py-1 text-xs font-medium ${
+                      court.is_active
+                        ? 'bg-emerald-100 text-emerald-700'
+                        : 'bg-slate-100 text-slate-500'
+                    }`}
+                  >
+                    {court.is_active ? 'Open for booking' : 'Disabled'}
+                  </span>
+                  <button
+                    onClick={() => handleToggleActive(court)}
+                    disabled={isSaving}
+                    className="rounded-lg bg-slate-100 text-slate-700 border border-slate-200 text-xs font-medium px-3 py-1.5 hover:bg-slate-200 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                  >
+                    {court.is_active ? 'Disable' : 'Enable'}
+                  </button>
+                </div>
+
+                {!court.is_active && (
+                  <label className="flex items-start gap-2 cursor-pointer mb-3 text-xs">
+                    <input
+                      type="checkbox"
+                      checked={court.show_when_disabled}
+                      onChange={() => handleToggleShowWhenDisabled(court)}
+                      disabled={isSaving}
+                      className="mt-0.5 h-3.5 w-3.5 rounded border-slate-300 text-emerald-600 focus:ring-emerald-500"
+                    />
+                    <span className="text-slate-500">
+                      {court.show_when_disabled ? (
+                        <>
+                          Still shown on the landing page, labeled{' '}
+                          <span className="font-medium text-slate-600">
+                            &quot;Available Soon&quot;
+                          </span>
+                        </>
+                      ) : (
+                        'Hidden from the booking page and landing page'
+                      )}
+                    </span>
+                  </label>
+                )}
 
                 <div className="flex items-center gap-3">
                   {court.image_url && (

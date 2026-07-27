@@ -256,7 +256,11 @@ export default function BookingPageClient({
 
   useEffect(() => {
     async function loadCourts() {
-      const { data, error } = await supabase.from('courts').select('id, name').order('id');
+      const { data, error } = await supabase
+        .from('courts')
+        .select('id, name')
+        .eq('is_active', true)
+        .order('sort_order');
       if (error) {
         console.error('Failed to load courts:', error);
         return;

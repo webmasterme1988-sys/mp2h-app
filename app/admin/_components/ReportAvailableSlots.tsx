@@ -44,7 +44,7 @@ export default function ReportAvailableSlots() {
     supabase
       .from('courts')
       .select('id, name')
-      .order('id')
+      .order('sort_order')
       .then(({ data, error }) => {
         if (error) {
           console.error('Failed to load courts:', error);

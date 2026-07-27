@@ -23,6 +23,8 @@ interface Court {
   id: string;
   name: string;
   image_url: string | null;
+  is_active: boolean;
+  show_when_disabled: boolean;
 }
 
 const WEEKDAY_LABELS = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
@@ -38,10 +40,18 @@ export default async function LandingPage() {
   const [settings, photos, courtsResult] = await Promise.all([
     fetchSiteSettings(supabase),
     fetchLandingPhotos(supabase),
-    supabase.from('courts').select('id, name, image_url').order('id'),
+    supabase
+      .from('courts')
+      .select('id, name, image_url, is_active, show_when_disabled')
+      .order('sort_order'),
   ]);
 
-  const courts = (courtsResult.data ?? []) as Court[];
+  const allCourts = (courtsResult.data ?? []) as Court[];
+  // A disabled court is hidden from this gallery by default — this is an
+  // informational listing only (no booking link per court), so per-court
+  // "show while disabled" is purely a display choice, never a way to book
+  // an unavailable court either way.
+  const courts = allCourts.filter((c) => c.is_active || c.show_when_disabled);
   const tagline = settings.landing_tagline || settings.site_subtitle;
   // Guards against contentEditable's empty-but-truthy artifacts (e.g. a
   // bare "<br>" left behind after an admin deletes all the visible text),
@@ -151,7 +161,9 @@ export default async function LandingPage() {
               {courts.map((court) => (
                 <div
                   key={court.id}
-                  className="bg-white rounded-2xl border border-slate-200 overflow-hidden text-center"
+                  className={`bg-white rounded-2xl border border-slate-200 overflow-hidden text-center relative ${
+                    court.is_active ? '' : 'opacity-60'
+                  }`}
                 >
                   {court.image_url ? (
                     // eslint-disable-next-line @next/next/no-img-element
@@ -161,6 +173,11 @@ export default async function LandingPage() {
                       className="w-full h-32 object-cover"
                     />
                   ) : null}
+                  {!court.is_active && (
+                    <span className="absolute top-2 right-2 rounded-full bg-slate-800/80 text-white text-xs font-medium px-2.5 py-1">
+                      Available Soon
+                    </span>
+                  )}
                   <p className="font-display text-lg text-mp2h-navy tracking-wide p-4">
                     {court.name}
                   </p>

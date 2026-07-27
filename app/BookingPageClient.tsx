@@ -32,6 +32,19 @@ function formatCountdown(ms: number) {
   return `${minutes}:${String(seconds).padStart(2, '0')}`;
 }
 
+// "Mon, Jul 27, 2026" — `selectedDate` is a plain YYYY-MM-DD string with no
+// time/timezone component, so parsing it as local midnight (rather than
+// letting the Date constructor treat a bare date string as UTC) keeps the
+// weekday from shifting a day off depending on the browser's timezone.
+function formatDateWithWeekday(dateISO: string) {
+  return new Date(`${dateISO}T00:00:00`).toLocaleDateString('en-US', {
+    weekday: 'short',
+    month: 'short',
+    day: 'numeric',
+    year: 'numeric',
+  });
+}
+
 interface BookingPageClientProps {
   initialSettings: SiteSettings;
   initialQrCodes: PaymentQrCode[];
@@ -834,20 +847,6 @@ export default function BookingPageClient({
             </button>
           )}
 
-          <div className="flex items-center gap-4 mt-4 text-xs text-slate-500">
-            <span className="flex items-center gap-1.5">
-              <span className="w-3 h-3 rounded bg-white border border-slate-300 inline-block" />
-              Available
-            </span>
-            <span className="flex items-center gap-1.5">
-              <span className="w-3 h-3 rounded bg-slate-100 border border-slate-200 inline-block" />
-              Booked
-            </span>
-            <span className="flex items-center gap-1.5">
-              <span className="w-3 h-3 rounded bg-slate-50 border border-slate-200 inline-block" />
-              Unavailable
-            </span>
-          </div>
         </section>
       </main>
 
@@ -859,7 +858,8 @@ export default function BookingPageClient({
               <div>
                 <h3 className="font-semibold text-slate-800">Confirm your booking</h3>
                 <p className="text-xs text-slate-500 mt-0.5">
-                  {courts.find((c) => c.id === selectedCourtId)?.name} · {selectedDate} ·{' '}
+                  {courts.find((c) => c.id === selectedCourtId)?.name} ·{' '}
+                  {formatDateWithWeekday(selectedDate)} ·{' '}
                   {selectedSlots.length === 1
                     ? selectedSlots[0].label
                     : `${selectedSlots.length} slots selected`}
@@ -936,12 +936,7 @@ export default function BookingPageClient({
                     <div className="flex justify-between text-slate-500">
                       <span>Date</span>
                       <span className="font-medium text-slate-700">
-                        {new Date(`${selectedDate}T00:00:00`).toLocaleDateString('en-US', {
-                          weekday: 'short',
-                          month: 'short',
-                          day: 'numeric',
-                          year: 'numeric',
-                        })}
+                        {formatDateWithWeekday(selectedDate)}
                       </span>
                     </div>
 

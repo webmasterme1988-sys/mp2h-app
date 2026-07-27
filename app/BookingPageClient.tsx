@@ -72,7 +72,10 @@ export default function BookingPageClient({
   const [selectedCourtId, setSelectedCourtId] = useState<string | null>(null);
   const [selectedDate, setSelectedDate] = useState<string>(todayISODate());
   const [bookedStartTimes, setBookedStartTimes] = useState<Set<number>>(new Set());
-  const [blockedStartTimes, setBlockedStartTimes] = useState<Set<number>>(new Set());
+  // Maps a blocked slot's start time to the admin's label for it (e.g. "Open
+  // Play", "Maintenance") — null means blocked with no label set, which
+  // falls back to a generic "Unavailable" at render time.
+  const [blockedSlotLabels, setBlockedSlotLabels] = useState<Map<number, string | null>>(new Map());
   const [loadingSlots, setLoadingSlots] = useState(false);
   const [slotsError, setSlotsError] = useState<string | null>(null);
 
@@ -307,7 +310,7 @@ export default function BookingPageClient({
         .in('status', ['pending', 'confirmed']),
       supabase
         .from('blocked_slots')
-        .select('start_time')
+        .select('start_time, reason')
         .eq('court_id', selectedCourtId)
         .gte('start_time', dayStart)
         .lte('start_time', dayEnd),
@@ -355,13 +358,14 @@ export default function BookingPageClient({
     ((holdsResult.data as { start_time: string; created_at: string }[] | null) ?? [])
       .filter((row) => nowTime - new Date(row.created_at).getTime() < checkoutHoldMs)
       .forEach((row) => bookedSet.add(new Date(row.start_time).getTime()));
-    const blockedSet = new Set<number>(
-      (blockedResult.data ?? []).map((row: { start_time: string }) =>
-        new Date(row.start_time).getTime()
-      )
+    const blockedLabels = new Map<number, string | null>(
+      (blockedResult.data ?? []).map((row: { start_time: string; reason: string | null }) => [
+        new Date(row.start_time).getTime(),
+        row.reason,
+      ])
     );
     setBookedStartTimes(bookedSet);
-    setBlockedStartTimes(blockedSet);
+    setBlockedSlotLabels(blockedLabels);
     setLoadingSlots(false);
   }, [selectedCourtId, selectedDate, isDateClosed, approvalHoldMs, checkoutHoldMs]);
 
@@ -383,7 +387,14 @@ export default function BookingPageClient({
 
   function isSlotBlocked(slot: TimeSlot) {
     const t = new Date(slot.startISO(selectedDate)).getTime();
-    return blockedStartTimes.has(t);
+    return blockedSlotLabels.has(t);
+  }
+
+  // The admin's label for this blocked slot (e.g. "Open Play"), falling
+  // back to a generic "Unavailable" when no label was set.
+  function getBlockedSlotLabel(slot: TimeSlot) {
+    const t = new Date(slot.startISO(selectedDate)).getTime();
+    return blockedSlotLabels.get(t) || 'Unavailable';
   }
 
   function isSlotPast(slot: TimeSlot) {
@@ -820,7 +831,7 @@ export default function BookingPageClient({
                         : 'bg-white border-slate-300 text-slate-700 hover:bg-emerald-50 hover:border-emerald-400 active:scale-[0.98]'
                     }`}
                   >
-                    {blocked ? 'Unavailable' : past ? 'Past' : slot.label}
+                    {blocked ? getBlockedSlotLabel(slot) : past ? 'Past' : slot.label}
                     {!blocked && !past && !booked && settings.show_price && (
                       <span className={`block text-xs mt-0.5 ${selected ? 'text-white/90' : 'text-slate-400'}`}>
                         {formatPrice(getPrice(slot.hour))}

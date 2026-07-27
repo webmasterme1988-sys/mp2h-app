@@ -157,11 +157,11 @@ export default async function LandingPage() {
             <h2 className="font-display text-3xl text-mp2h-navy mb-6 text-center tracking-wide">
               Our Courts
             </h2>
-            <div className="grid grid-cols-2 sm:grid-cols-3 gap-4">
+            <div className="flex flex-wrap justify-center gap-4">
               {courts.map((court) => (
                 <div
                   key={court.id}
-                  className={`bg-white rounded-2xl border border-slate-200 overflow-hidden text-center relative ${
+                  className={`w-[calc(50%-0.5rem)] sm:w-[calc(33.333%-0.667rem)] bg-white rounded-2xl border border-slate-200 overflow-hidden text-center relative ${
                     court.is_active ? '' : 'opacity-60'
                   }`}
                 >

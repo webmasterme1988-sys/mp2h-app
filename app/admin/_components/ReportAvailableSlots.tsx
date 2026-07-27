@@ -44,6 +44,7 @@ export default function ReportAvailableSlots() {
     supabase
       .from('courts')
       .select('id, name')
+      .eq('is_active', true)
       .order('sort_order')
       .then(({ data, error }) => {
         if (error) {

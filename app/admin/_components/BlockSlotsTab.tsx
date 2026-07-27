@@ -21,6 +21,10 @@ interface BlockedSlot {
   courts: { name: string } | null;
 }
 
+// Common reasons to block a slot — quick-pick chips below still leave the
+// text field open for anything else the admin wants to label it.
+const BLOCK_LABEL_PRESETS = ['Open Play', 'Unavailable', 'Maintenance', 'Private Event'];
+
 function formatDateTime(iso: string) {
   return new Date(iso).toLocaleString('en-US', {
     month: 'short',
@@ -67,6 +71,7 @@ export default function BlockSlotsTab() {
     supabase
       .from('courts')
       .select('id, name')
+      .eq('is_active', true)
       .order('sort_order')
       .then(({ data, error }) => {
         if (error) {
@@ -322,8 +327,29 @@ export default function BlockSlotsTab() {
 
         <div>
           <label className="block text-sm font-medium text-slate-600 mb-1">
-            Reason <span className="text-slate-400 font-normal">(optional)</span>
+            Label <span className="text-slate-400 font-normal">(optional)</span>
           </label>
+          <p className="text-xs text-slate-500 mb-2">
+            Shown to customers on the booking page in place of the time slot, e.g. instead of
+            just &quot;Unavailable&quot; they&apos;ll see &quot;Open Play&quot;. Pick a common
+            one or type your own.
+          </p>
+          <div className="flex flex-wrap gap-2 mb-2">
+            {BLOCK_LABEL_PRESETS.map((preset) => (
+              <button
+                key={preset}
+                type="button"
+                onClick={() => setBlockReason(preset)}
+                className={`rounded-full border px-3 py-1 text-xs font-medium transition-colors ${
+                  blockReason === preset
+                    ? 'bg-[var(--admin-btn-bg)] text-[var(--admin-btn-label)] border-transparent'
+                    : 'bg-white border-slate-300 text-slate-600 hover:border-emerald-400'
+                }`}
+              >
+                {preset}
+              </button>
+            ))}
+          </div>
           <input
             type="text"
             value={blockReason}

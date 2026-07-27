@@ -949,13 +949,14 @@ export default function BookingsTab() {
               <thead>
                 <tr className="border-b border-slate-200 text-left text-xs font-medium text-slate-500 uppercase tracking-wide">
                   <SortHeader column="player" sortColumn={sortColumn} sortDirection={sortDirection} onSort={handleSort}>Player</SortHeader>
+                  <th className="px-4 sm:px-6 py-3 whitespace-nowrap">Booked Date</th>
+                  <SortHeader column="hours" sortColumn={sortColumn} sortDirection={sortDirection} onSort={handleSort}>Total Hours</SortHeader>
+                  <th className="px-4 sm:px-6 py-3 whitespace-nowrap">Timeslots</th>
+                  <SortHeader column="court" sortColumn={sortColumn} sortDirection={sortDirection} onSort={handleSort}>Court</SortHeader>
                   <SortHeader column="phone" sortColumn={sortColumn} sortDirection={sortDirection} onSort={handleSort}>Phone</SortHeader>
                   <SortHeader column="transaction" sortColumn={sortColumn} sortDirection={sortDirection} onSort={handleSort}>Confirmation #</SortHeader>
                   <th className="px-4 sm:px-6 py-3 whitespace-nowrap">Reference #</th>
                   <SortHeader column="date" sortColumn={sortColumn} sortDirection={sortDirection} onSort={handleSort}>Transaction Date</SortHeader>
-                  <th className="px-4 sm:px-6 py-3 whitespace-nowrap">Booked Date</th>
-                  <SortHeader column="court" sortColumn={sortColumn} sortDirection={sortDirection} onSort={handleSort}>Court</SortHeader>
-                  <SortHeader column="hours" sortColumn={sortColumn} sortDirection={sortDirection} onSort={handleSort}>Total Hours</SortHeader>
                   {settings.show_price && (
                     <SortHeader column="price" sortColumn={sortColumn} sortDirection={sortDirection} onSort={handleSort}>Price</SortHeader>
                   )}
@@ -978,6 +979,20 @@ export default function BookingsTab() {
                         {group.playerName}
                       </td>
                       <td className="px-4 sm:px-6 py-3 text-slate-600 whitespace-nowrap">
+                        {formatDateOnly(group.bookings[0].start_time)}
+                      </td>
+                      <td className="px-4 sm:px-6 py-3 text-slate-600 whitespace-nowrap">
+                        {group.totalHours}
+                      </td>
+                      <td className="px-4 sm:px-6 py-3 text-slate-600 whitespace-nowrap">
+                        {group.bookings
+                          .map((b) => formatSlotTimeRange(b.start_time, b.end_time))
+                          .join(', ')}
+                      </td>
+                      <td className="px-4 sm:px-6 py-3 text-slate-600 whitespace-nowrap">
+                        {group.courtName}
+                      </td>
+                      <td className="px-4 sm:px-6 py-3 text-slate-600 whitespace-nowrap">
                         <div>{group.playerPhone}</div>
                         {group.playerEmail && (
                           <div className="text-xs text-slate-400">{group.playerEmail}</div>
@@ -991,15 +1006,6 @@ export default function BookingsTab() {
                       </td>
                       <td className="px-4 sm:px-6 py-3 text-slate-600 whitespace-nowrap">
                         {formatDateTime(group.createdAt)}
-                      </td>
-                      <td className="px-4 sm:px-6 py-3 text-slate-600 whitespace-nowrap">
-                        {formatDateOnly(group.bookings[0].start_time)}
-                      </td>
-                      <td className="px-4 sm:px-6 py-3 text-slate-600 whitespace-nowrap">
-                        {group.courtName}
-                      </td>
-                      <td className="px-4 sm:px-6 py-3 text-slate-600 whitespace-nowrap">
-                        {group.totalHours}
                       </td>
                       {settings.show_price && (
                         <td className="px-4 sm:px-6 py-3 text-slate-600 whitespace-nowrap">

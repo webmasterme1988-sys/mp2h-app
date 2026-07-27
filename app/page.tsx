@@ -2,6 +2,7 @@ import Script from 'next/script';
 import { createPublicServerClient } from '@/lib/supabase/publicServerClient';
 import { fetchSiteSettings } from '@/lib/siteSettings';
 import { fetchLandingPhotos } from '@/lib/landingPhotos';
+import { fetchHolidays } from '@/lib/holidays';
 import { formatHourLabel } from '@/lib/timeSlots';
 import { getDirectionsUrl, getMapsEmbedUrl } from '@/lib/googleMaps';
 import { normalizeRichText } from '@/lib/richText';
@@ -34,17 +35,35 @@ function formatOpenDays(openDays: number[]) {
   return [...openDays].sort((a, b) => a - b).map((d) => WEEKDAY_LABELS[d]).join(', ');
 }
 
+// "Mon, Dec 25, 2026" — parsed as local midnight (not left to the Date
+// constructor's UTC assumption for a bare date string) so the weekday
+// can't shift a day off depending on the server's timezone.
+function formatDateWithWeekday(dateISO: string) {
+  return new Date(`${dateISO}T00:00:00`).toLocaleDateString('en-US', {
+    weekday: 'short',
+    month: 'short',
+    day: 'numeric',
+    year: 'numeric',
+  });
+}
+
 export default async function LandingPage() {
   const supabase = createPublicServerClient();
 
-  const [settings, photos, courtsResult] = await Promise.all([
+  const [settings, photos, courtsResult, holidays] = await Promise.all([
     fetchSiteSettings(supabase),
     fetchLandingPhotos(supabase),
     supabase
       .from('courts')
       .select('id, name, image_url, is_active, show_when_disabled')
       .order('sort_order'),
+    fetchHolidays(supabase),
   ]);
+
+  const todayISO = new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Manila' });
+  const upcomingHolidays = holidays
+    .filter((h) => h.holiday_date >= todayISO)
+    .sort((a, b) => a.holiday_date.localeCompare(b.holiday_date));
 
   const allCourts = (courtsResult.data ?? []) as Court[];
   // A disabled court is hidden from this gallery by default — this is an
@@ -196,6 +215,16 @@ export default async function LandingPage() {
             {formatOpenDays(settings.open_days)} · {formatHourLabel(settings.opening_hour)} –{' '}
             {formatHourLabel(settings.closing_hour)}
           </p>
+          {upcomingHolidays.length > 0 && (
+            <div className="mt-4 text-sm text-white/70 space-y-0.5">
+              {upcomingHolidays.map((holiday) => (
+                <p key={holiday.id}>
+                  Note: {formatDateWithWeekday(holiday.holiday_date)}
+                  {holiday.name ? ` — ${holiday.name}` : ''}
+                </p>
+              ))}
+            </div>
+          )}
         </div>
       </section>
 

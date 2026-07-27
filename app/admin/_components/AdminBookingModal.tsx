@@ -362,7 +362,9 @@ export default function AdminBookingModal({
           </div>
 
           <div>
-            <label className="block text-sm font-medium text-slate-600 mb-1">Customer Name</label>
+            <label className="block text-sm font-medium text-slate-600 mb-1">
+              Customer Name <span className="text-red-500">*</span>
+            </label>
             <input
               type="text"
               value={playerName}
@@ -374,7 +376,9 @@ export default function AdminBookingModal({
           </div>
 
           <div>
-            <label className="block text-sm font-medium text-slate-600 mb-1">Phone Number</label>
+            <label className="block text-sm font-medium text-slate-600 mb-1">
+              Phone Number <span className="text-red-500">*</span>
+            </label>
             <input
               type="tel"
               value={playerPhone}
@@ -426,7 +430,9 @@ export default function AdminBookingModal({
           </div>
 
           <div>
-            <label className="block text-sm font-medium text-slate-600 mb-1">Remark</label>
+            <label className="block text-sm font-medium text-slate-600 mb-1">
+              Remark <span className="text-red-500">*</span>
+            </label>
             <textarea
               value={remark}
               onChange={(e) => setRemark(e.target.value)}

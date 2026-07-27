@@ -7,7 +7,11 @@ interface DateCalendarProps {
   minDate: string; // 'YYYY-MM-DD'
   onSelect: (date: string) => void;
   accentColor?: string; // defaults to emerald-600, override for branded pages
-  isDateDisabled?: (iso: string) => boolean; // e.g. closed weekdays, holidays
+  isDateDisabled?: (iso: string) => boolean; // e.g. closed weekdays
+  // Highlighted red/white but still clickable — distinct from isDateDisabled,
+  // which blocks selection entirely. Lets a holiday stand out on the
+  // calendar while still letting the customer click into it to see why.
+  isDateHoliday?: (iso: string) => boolean;
 }
 
 const WEEKDAY_LABELS = ['S', 'M', 'T', 'W', 'T', 'F', 'S'];
@@ -31,6 +35,7 @@ export default function DateCalendar({
   onSelect,
   accentColor,
   isDateDisabled,
+  isDateHoliday,
 }: DateCalendarProps) {
   const initial = parseISODate(selectedDate);
   const [viewYear, setViewYear] = useState(initial.year);
@@ -101,6 +106,7 @@ export default function DateCalendar({
           const iso = toISODate(viewYear, viewMonth, day);
           const isSelected = iso === selectedDate;
           const isDisabled = iso < minDate || (isDateDisabled?.(iso) ?? false);
+          const isHoliday = !isDisabled && (isDateHoliday?.(iso) ?? false);
 
           return (
             <button
@@ -108,9 +114,13 @@ export default function DateCalendar({
               type="button"
               disabled={isDisabled}
               onClick={() => onSelect(iso)}
-              style={isSelected && accentColor ? { backgroundColor: accentColor } : undefined}
+              style={isSelected && accentColor && !isHoliday ? { backgroundColor: accentColor } : undefined}
               className={`aspect-square rounded-lg text-sm transition-colors ${
-                isSelected
+                isHoliday
+                  ? `bg-red-100 text-red-700 hover:bg-red-200 ${
+                      isSelected ? 'font-semibold ring-2 ring-offset-1 ring-red-400' : ''
+                    }`
+                  : isSelected
                   ? accentColor
                     ? 'text-white font-semibold'
                     : 'bg-emerald-600 text-white font-semibold'

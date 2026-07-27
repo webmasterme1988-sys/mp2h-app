@@ -242,14 +242,33 @@ export default function BookingPageClient({
   );
 
   const holidayDates = useMemo(() => new Set(holidays.map((h) => h.holiday_date)), [holidays]);
+  // Date -> holiday name, so the "closed" message can name which holiday
+  // it is instead of just saying the day is closed.
+  const holidayNames = useMemo(
+    () => new Map(holidays.map((h) => [h.holiday_date, h.name])),
+    [holidays]
+  );
 
-  const isDateClosed = useCallback(
+  // Purely the recurring weekly schedule — no holidays. This is what
+  // actually blocks a date from being selected at all; holidays stay
+  // clickable (see isDateHoliday below) so the customer can see the note
+  // about which holiday it is instead of the date just being greyed out.
+  const isWeeklyClosed = useCallback(
     (iso: string) => {
-      if (holidayDates.has(iso)) return true;
       const weekday = new Date(`${iso}T00:00:00`).getDay();
       return !settings.open_days.includes(weekday);
     },
-    [holidayDates, settings.open_days]
+    [settings.open_days]
+  );
+
+  const isDateHoliday = useCallback((iso: string) => holidayDates.has(iso), [holidayDates]);
+
+  // Combined "nothing to book here" check — weekly closure OR a holiday —
+  // used only for deciding whether to fetch availability at all and where
+  // to auto-jump the initial default date, not for calendar selectability.
+  const isDateClosed = useCallback(
+    (iso: string) => isWeeklyClosed(iso) || isDateHoliday(iso),
+    [isWeeklyClosed, isDateHoliday]
   );
 
   // If the default date (today) turns out to be closed, jump to the next
@@ -714,6 +733,17 @@ export default function BookingPageClient({
 
   // ---------- Render ----------
 
+  // If every slot for the selected court/date is blocked (an admin's
+  // "Block Entire Day"), surface that as a note rather than rendering a
+  // grid of slots that are all disabled anyway. Only meaningful once slots
+  // have actually loaded and the day isn't already closed for a bigger
+  // reason (holiday/weekly closure), which takes precedence below.
+  const fullDayBlockLabel =
+    !isDateClosed(selectedDate) && !loadingSlots && timeSlots.length > 0 && timeSlots.every(isSlotBlocked)
+      ? getBlockedSlotLabel(timeSlots[0])
+      : null;
+  const holidayName = holidayNames.get(selectedDate) ?? null;
+
   return (
     <div className="min-h-screen bg-slate-50">
       {/* Header */}
@@ -788,7 +818,8 @@ export default function BookingPageClient({
                 minDate={todayISODate()}
                 onSelect={setSelectedDate}
                 accentColor={settings.selection_color}
-                isDateDisabled={isDateClosed}
+                isDateDisabled={isWeeklyClosed}
+                isDateHoliday={isDateHoliday}
               />
             </div>
           </div>
@@ -802,12 +833,26 @@ export default function BookingPageClient({
             <p className="text-sm text-red-600 mb-3">{slotsError}</p>
           )}
 
-          {isDateClosed(selectedDate) ? (
+          {isWeeklyClosed(selectedDate) ? (
             <p className="text-sm text-slate-500 bg-slate-50 border border-slate-200 rounded-xl px-4 py-3">
               We&apos;re closed on this day. Please pick another date.
             </p>
+          ) : holidayName ? (
+            <div className="text-sm text-slate-500 bg-slate-50 border border-slate-200 rounded-xl px-4 py-3">
+              <p className="font-medium text-slate-700 mb-1">
+                Note: {formatDateWithWeekday(selectedDate)} — {holidayName}
+              </p>
+              <p>This date is a holiday. Please pick another date.</p>
+            </div>
           ) : loadingSlots ? (
             <p className="text-sm text-slate-400">Checking availability…</p>
+          ) : fullDayBlockLabel ? (
+            <div className="text-sm text-slate-500 bg-slate-50 border border-slate-200 rounded-xl px-4 py-3">
+              <p className="font-medium text-slate-700 mb-1">
+                Note: {formatDateWithWeekday(selectedDate)} — {fullDayBlockLabel}
+              </p>
+              <p>This court isn&apos;t available on this day. Please pick another date or court.</p>
+            </div>
           ) : (
             <div className="grid grid-cols-2 sm:grid-cols-3 gap-2.5">
               {timeSlots.map((slot) => {
@@ -1138,7 +1183,9 @@ export default function BookingPageClient({
 
                   {/* Name / Phone */}
                   <div>
-                    <label className="block text-sm font-medium text-slate-600 mb-1">Full Name</label>
+                    <label className="block text-sm font-medium text-slate-600 mb-1">
+                      Full Name <span className="text-red-500">*</span>
+                    </label>
                     <input
                       type="text"
                       value={playerName}
@@ -1149,7 +1196,9 @@ export default function BookingPageClient({
                   </div>
 
                   <div>
-                    <label className="block text-sm font-medium text-slate-600 mb-1">Phone Number</label>
+                    <label className="block text-sm font-medium text-slate-600 mb-1">
+                      Phone Number <span className="text-red-500">*</span>
+                    </label>
                     <input
                       type="tel"
                       value={playerPhone}
@@ -1161,7 +1210,7 @@ export default function BookingPageClient({
 
                   <div>
                     <label className="block text-sm font-medium text-slate-600 mb-1">
-                      Email Address
+                      Email Address <span className="text-red-500">*</span>
                     </label>
                     <input
                       type="email"
@@ -1247,7 +1296,7 @@ export default function BookingPageClient({
                   {/* Receipt upload */}
                   <div>
                     <label className="block text-sm font-medium text-slate-600 mb-1">
-                      Upload Payment Receipt
+                      Upload Payment Receipt <span className="text-red-500">*</span>
                     </label>
                     <input
                       type="file"

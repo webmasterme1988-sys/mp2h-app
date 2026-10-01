@@ -950,6 +950,7 @@ export default function BookingsTab() {
                 <tr className="border-b border-slate-200 text-left text-xs font-medium text-slate-500 uppercase tracking-wide">
                   <SortHeader column="player" sortColumn={sortColumn} sortDirection={sortDirection} onSort={handleSort}>Player</SortHeader>
                   <th className="px-4 sm:px-6 py-3 whitespace-nowrap">Booked Date</th>
+                  <SortHeader column="court" sortColumn={sortColumn} sortDirection={sortDirection} onSort={handleSort}>Court</SortHeader>
                   <th className="px-4 sm:px-6 py-3 whitespace-nowrap">Receipt</th>
                   {settings.show_price && (
                     <SortHeader column="price" sortColumn={sortColumn} sortDirection={sortDirection} onSort={handleSort}>Price</SortHeader>
@@ -978,6 +979,9 @@ export default function BookingsTab() {
                       </td>
                       <td className="px-4 sm:px-6 py-3 text-slate-600 whitespace-nowrap">
                         {formatDateOnly(group.bookings[0].start_time)}
+                      </td>
+                      <td className="px-4 sm:px-6 py-3 text-slate-600 whitespace-nowrap">
+                        {group.courtName}
                       </td>
                       <td
                         className="px-4 sm:px-6 py-3 whitespace-nowrap"

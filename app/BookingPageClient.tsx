@@ -1239,8 +1239,9 @@ export default function BookingPageClient({
                         and continue your booking.
                       </li>
                     </ul>
-                    <p className="font-medium mt-2">
-                      Important: No confirmation number means your booking is not successful.
+                    <p className="mt-2">
+                      <strong className="font-bold">Important:</strong> No confirmation number
+                      means your booking is not successful.
                     </p>
                     <p className="mt-2">Need help? Contact us via the MP2H Page if you encounter any issues.</p>
                   </div>

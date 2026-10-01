@@ -7,6 +7,12 @@ export interface CustomerEmailSlot {
   price: number | null;
 }
 
+export interface CustomerEmailAddon {
+  name: string;
+  price: number; // per-unit, snapshotted at booking time
+  quantity: number;
+}
+
 export interface CustomerEmailParams {
   playerName: string;
   playerPhone: string;
@@ -16,6 +22,12 @@ export interface CustomerEmailParams {
   dateLabel: string; // e.g. "Jul 22, 2026"
   slots: CustomerEmailSlot[];
   totalHours: number;
+  // Add-ons belong to the whole transaction, not a single slot — shown for
+  // context on every confirmation email for that transaction (one may be
+  // sent per slot, see confirm-notify), but deliberately left out of
+  // totalPrice below so a multi-slot booking doesn't double-count them
+  // across its several per-slot emails.
+  addons: CustomerEmailAddon[];
   totalPrice: number | null; // null = don't show a total line at all
   footerHtml: string | null; // admin-configured, from the WYSIWYG editor
   address: string | null;
@@ -65,6 +77,7 @@ export function buildCustomerConfirmationEmail(
     dateLabel,
     slots,
     totalHours,
+    addons,
     totalPrice,
     address,
     directionsUrl,
@@ -94,6 +107,9 @@ export function buildCustomerConfirmationEmail(
       (s) => `  - ${s.timeRange}${s.price !== null ? ` (${formatPrice(s.price)})` : ''}`
     ),
     `Total Hours: ${totalHours}`,
+    addons.length > 0 ? '' : null,
+    addons.length > 0 ? 'Add-ons:' : null,
+    ...addons.map((a) => `  - ${a.name} x${a.quantity} (${formatPrice(a.price * a.quantity)})`),
     totalPrice !== null ? '' : null,
     totalPrice !== null ? `Total: ${formatPrice(totalPrice)}` : null,
     directionsUrl ? '' : null,
@@ -119,6 +135,13 @@ export function buildCustomerConfirmationEmail(
     )
     .join('');
 
+  const addonsHtml = addons
+    .map(
+      (a) =>
+        `&nbsp;&nbsp;- ${escapeHtml(a.name)} x${a.quantity} (${formatPrice(a.price * a.quantity)})<br>`
+    )
+    .join('');
+
   const html = `
 <div style="font-family: Arial, Helvetica, sans-serif; font-size: 14px; color: #1f2937; line-height: 1.6;">
   <p style="margin: 0 0 16px;">Hi <strong>${escapeHtml(playerName)}</strong>,</p>
@@ -134,6 +157,14 @@ export function buildCustomerConfirmationEmail(
     ${slotsHtml}
     Total Hours: ${totalHours}
   </p>
+  ${
+    addonsHtml
+      ? `<p style="margin: 0 0 16px;">
+    Add-ons:<br>
+    ${addonsHtml}
+  </p>`
+      : ''
+  }
   ${totalPrice !== null ? `<p style="margin: 0 0 16px;">Total: ${formatPrice(totalPrice)}</p>` : ''}
   ${
     directionsUrl

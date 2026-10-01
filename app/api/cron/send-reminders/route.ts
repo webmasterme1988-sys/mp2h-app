@@ -2,7 +2,7 @@ import { NextResponse, type NextRequest } from 'next/server';
 import { getSupabaseAdmin } from '@/lib/supabase/admin';
 import { getMailTransporter, fetchEmailCredentials } from '@/lib/mailer';
 import { fetchSiteSettings } from '@/lib/siteSettings';
-import { buildCustomerReminderEmail } from '@/lib/reminderEmailTemplate';
+import { buildCustomerReminderEmail, type ReminderEmailAddon } from '@/lib/reminderEmailTemplate';
 import { getDirectionsUrl } from '@/lib/googleMaps';
 
 interface ReminderBookingRow {
@@ -124,6 +124,34 @@ export async function POST(request: NextRequest) {
     const dueBookings = (data ?? []) as unknown as ReminderBookingRow[];
     if (dueBookings.length === 0) continue;
 
+    // Add-ons are keyed by transaction, not by individual booking slot —
+    // fetch them once per tier for every transaction due this run.
+    const transactionIds = Array.from(
+      new Set(
+        dueBookings
+          .map((b) => b.transaction_id)
+          .filter((id): id is number => id !== null)
+      )
+    );
+    const addonsByTransaction = new Map<number, ReminderEmailAddon[]>();
+    if (transactionIds.length > 0) {
+      const { data: addonRows, error: addonError } = await supabaseAdmin
+        .from('booking_addons')
+        .select('transaction_id, name_snapshot, price_snapshot, quantity')
+        .in('transaction_id', transactionIds);
+
+      if (addonError) {
+        console.error('Failed to load add-ons for reminders:', addonError);
+        errors.push(addonError.message);
+      } else {
+        for (const row of addonRows ?? []) {
+          const list = addonsByTransaction.get(row.transaction_id) ?? [];
+          list.push({ name: row.name_snapshot, price: row.price_snapshot, quantity: row.quantity });
+          addonsByTransaction.set(row.transaction_id, list);
+        }
+      }
+    }
+
     // One email per transaction, not per slot — if a multi-slot booking's
     // several hours all happen to come due in the same run, it gets one
     // combined reminder instead of one per slot.
@@ -145,6 +173,10 @@ export async function POST(request: NextRequest) {
       const courtName = first.courts?.name ?? 'your court';
       const hasPrices = sorted.some((b) => b.price !== null);
       const total = sorted.reduce((sum, b) => sum + (b.price ?? 0), 0);
+      const addons = first.transaction_id !== null
+        ? addonsByTransaction.get(first.transaction_id) ?? []
+        : [];
+      const addonsTotal = addons.reduce((sum, a) => sum + a.price * a.quantity, 0);
 
       const { text, html } = buildCustomerReminderEmail({
         playerName: first.player_name,
@@ -157,7 +189,8 @@ export async function POST(request: NextRequest) {
           price: b.price,
         })),
         totalHours: sorted.length,
-        totalPrice: hasPrices ? total : null,
+        addons,
+        totalPrice: hasPrices || addons.length > 0 ? total + addonsTotal : null,
         footerHtml: settings.customer_email_footer_html,
         address: settings.landing_address,
         directionsUrl: getDirectionsUrl(settings),

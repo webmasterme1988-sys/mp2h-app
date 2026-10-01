@@ -7,6 +7,12 @@ export interface ReminderEmailSlot {
   price: number | null;
 }
 
+export interface ReminderEmailAddon {
+  name: string;
+  price: number; // per-unit, snapshotted at booking time
+  quantity: number;
+}
+
 export interface ReminderEmailParams {
   playerName: string;
   hoursBefore: number; // the admin-configured threshold that triggered this reminder
@@ -15,7 +21,8 @@ export interface ReminderEmailParams {
   dateLabel: string; // e.g. "Jul 22, 2026"
   slots: ReminderEmailSlot[];
   totalHours: number;
-  totalPrice: number | null; // null = don't show a total line at all
+  addons: ReminderEmailAddon[];
+  totalPrice: number | null; // null = don't show a total line at all; includes addons
   footerHtml: string | null; // admin-configured, from the WYSIWYG editor
   address: string | null;
   directionsUrl: string | null; // from lib/googleMaps's getDirectionsUrl
@@ -38,6 +45,7 @@ export function buildCustomerReminderEmail(
     dateLabel,
     slots,
     totalHours,
+    addons,
     totalPrice,
     address,
     directionsUrl,
@@ -60,6 +68,9 @@ export function buildCustomerReminderEmail(
       (s) => `  - ${s.timeRange}${s.price !== null ? ` (${formatPrice(s.price)})` : ''}`
     ),
     `Total Hours: ${totalHours}`,
+    addons.length > 0 ? '' : null,
+    addons.length > 0 ? 'Add-ons:' : null,
+    ...addons.map((a) => `  - ${a.name} x${a.quantity} (${formatPrice(a.price * a.quantity)})`),
     totalPrice !== null ? '' : null,
     totalPrice !== null ? `Total: ${formatPrice(totalPrice)}` : null,
     directionsUrl ? '' : null,
@@ -85,6 +96,13 @@ export function buildCustomerReminderEmail(
     )
     .join('');
 
+  const addonsHtml = addons
+    .map(
+      (a) =>
+        `&nbsp;&nbsp;- ${escapeHtml(a.name)} x${a.quantity} (${formatPrice(a.price * a.quantity)})<br>`
+    )
+    .join('');
+
   const html = `
 <div style="font-family: Arial, Helvetica, sans-serif; font-size: 14px; color: #1f2937; line-height: 1.6;">
   <p style="margin: 0 0 16px;">Hi <strong>${escapeHtml(playerName)}</strong>,</p>
@@ -99,6 +117,14 @@ export function buildCustomerReminderEmail(
     ${slotsHtml}
     Total Hours: ${totalHours}
   </p>
+  ${
+    addonsHtml
+      ? `<p style="margin: 0 0 16px;">
+    Add-ons:<br>
+    ${addonsHtml}
+  </p>`
+      : ''
+  }
   ${totalPrice !== null ? `<p style="margin: 0 0 16px;">Total: ${formatPrice(totalPrice)}</p>` : ''}
   ${
     directionsUrl

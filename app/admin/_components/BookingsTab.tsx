@@ -950,17 +950,15 @@ export default function BookingsTab() {
                 <tr className="border-b border-slate-200 text-left text-xs font-medium text-slate-500 uppercase tracking-wide">
                   <SortHeader column="player" sortColumn={sortColumn} sortDirection={sortDirection} onSort={handleSort}>Player</SortHeader>
                   <th className="px-4 sm:px-6 py-3 whitespace-nowrap">Booked Date</th>
-                  <SortHeader column="hours" sortColumn={sortColumn} sortDirection={sortDirection} onSort={handleSort}>Total Hours</SortHeader>
-                  <th className="px-4 sm:px-6 py-3 whitespace-nowrap">Timeslots</th>
-                  <SortHeader column="court" sortColumn={sortColumn} sortDirection={sortDirection} onSort={handleSort}>Court</SortHeader>
-                  <SortHeader column="phone" sortColumn={sortColumn} sortDirection={sortDirection} onSort={handleSort}>Phone</SortHeader>
-                  <SortHeader column="transaction" sortColumn={sortColumn} sortDirection={sortDirection} onSort={handleSort}>Confirmation #</SortHeader>
-                  <th className="px-4 sm:px-6 py-3 whitespace-nowrap">Reference #</th>
-                  <SortHeader column="date" sortColumn={sortColumn} sortDirection={sortDirection} onSort={handleSort}>Transaction Date</SortHeader>
+                  <th className="px-4 sm:px-6 py-3 whitespace-nowrap">Receipt</th>
                   {settings.show_price && (
                     <SortHeader column="price" sortColumn={sortColumn} sortDirection={sortDirection} onSort={handleSort}>Price</SortHeader>
                   )}
+                  <th className="px-4 sm:px-6 py-3 whitespace-nowrap">Timeslots</th>
+                  <SortHeader column="hours" sortColumn={sortColumn} sortDirection={sortDirection} onSort={handleSort}>Total Hours</SortHeader>
                   <SortHeader column="status" sortColumn={sortColumn} sortDirection={sortDirection} onSort={handleSort}>Status</SortHeader>
+                  <th className="px-4 sm:px-6 py-3 whitespace-nowrap">Reference #</th>
+                  <SortHeader column="date" sortColumn={sortColumn} sortDirection={sortDirection} onSort={handleSort}>Transaction Date</SortHeader>
                   <th className="px-4 sm:px-6 py-3">Details</th>
                   <th className="px-4 sm:px-6 py-3">Actions</th>
                 </tr>
@@ -981,37 +979,34 @@ export default function BookingsTab() {
                       <td className="px-4 sm:px-6 py-3 text-slate-600 whitespace-nowrap">
                         {formatDateOnly(group.bookings[0].start_time)}
                       </td>
-                      <td className="px-4 sm:px-6 py-3 text-slate-600 whitespace-nowrap">
-                        {group.totalHours}
-                      </td>
-                      <td className="px-4 sm:px-6 py-3 text-slate-600 whitespace-nowrap">
-                        {group.bookings
-                          .map((b) => formatSlotTimeRange(b.start_time, b.end_time))
-                          .join(', ')}
-                      </td>
-                      <td className="px-4 sm:px-6 py-3 text-slate-600 whitespace-nowrap">
-                        {group.courtName}
-                      </td>
-                      <td className="px-4 sm:px-6 py-3 text-slate-600 whitespace-nowrap">
-                        <div>{group.playerPhone}</div>
-                        {group.playerEmail && (
-                          <div className="text-xs text-slate-400">{group.playerEmail}</div>
+                      <td
+                        className="px-4 sm:px-6 py-3 whitespace-nowrap"
+                        onClick={(e) => e.stopPropagation()}
+                      >
+                        {group.receiptUrl ? (
+                          <button
+                            onClick={() => setReceiptModalUrl(group.receiptUrl)}
+                            className="text-emerald-700 hover:text-emerald-800 text-xs font-medium underline underline-offset-2"
+                          >
+                            View Receipt
+                          </button>
+                        ) : (
+                          <span className="text-xs text-slate-400">—</span>
                         )}
-                      </td>
-                      <td className="px-4 sm:px-6 py-3 text-slate-600 whitespace-nowrap font-mono text-xs">
-                        {group.confirmationNumber ?? '—'}
-                      </td>
-                      <td className="px-4 sm:px-6 py-3 text-slate-600 whitespace-nowrap font-mono text-xs">
-                        {group.transactionId !== null ? formatReferenceNumber(group.transactionId) : '—'}
-                      </td>
-                      <td className="px-4 sm:px-6 py-3 text-slate-600 whitespace-nowrap">
-                        {formatDateTime(group.createdAt)}
                       </td>
                       {settings.show_price && (
                         <td className="px-4 sm:px-6 py-3 text-slate-600 whitespace-nowrap">
                           {group.totalPrice !== null ? formatPrice(group.totalPrice) : '—'}
                         </td>
                       )}
+                      <td className="px-4 sm:px-6 py-3 text-slate-600 whitespace-nowrap">
+                        {group.bookings
+                          .map((b) => formatSlotTimeRange(b.start_time, b.end_time))
+                          .join(', ')}
+                      </td>
+                      <td className="px-4 sm:px-6 py-3 text-slate-600 whitespace-nowrap">
+                        {group.totalHours}
+                      </td>
                       <td className="px-4 sm:px-6 py-3 whitespace-nowrap">
                         <span
                           className={`inline-block rounded-full px-2.5 py-1 text-xs font-medium capitalize ${STATUS_STYLES[group.status]}`}
@@ -1026,6 +1021,12 @@ export default function BookingsTab() {
                             Hold expired
                           </span>
                         )}
+                      </td>
+                      <td className="px-4 sm:px-6 py-3 text-slate-600 whitespace-nowrap font-mono text-xs">
+                        {group.transactionId !== null ? formatReferenceNumber(group.transactionId) : '—'}
+                      </td>
+                      <td className="px-4 sm:px-6 py-3 text-slate-600 whitespace-nowrap">
+                        {formatDateTime(group.createdAt)}
                       </td>
                       <td
                         className="px-4 sm:px-6 py-3 whitespace-nowrap"
@@ -1163,7 +1164,8 @@ export default function BookingsTab() {
               <div>
                 <h3 className="font-semibold text-slate-800">Booking Details</h3>
                 <p className="text-xs text-slate-500 mt-0.5">
-                  {detailsGroup.playerName} · {detailsGroup.courtName}
+                  {detailsGroup.playerName} · {detailsGroup.courtName} · {detailsGroup.playerPhone}
+                  {detailsGroup.playerEmail && <> · {detailsGroup.playerEmail}</>}
                 </p>
               </div>
               <button

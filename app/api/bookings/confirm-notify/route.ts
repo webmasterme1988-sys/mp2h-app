@@ -5,7 +5,7 @@ import { createPublicServerClient } from '@/lib/supabase/publicServerClient';
 import { getSupabaseAdmin } from '@/lib/supabase/admin';
 import { getMailTransporter, fetchEmailCredentials } from '@/lib/mailer';
 import { fetchSiteSettings } from '@/lib/siteSettings';
-import { buildCustomerConfirmationEmail } from '@/lib/customerEmailTemplate';
+import { buildCustomerConfirmationEmail, type CustomerEmailAddon } from '@/lib/customerEmailTemplate';
 import { getDirectionsUrl } from '@/lib/googleMaps';
 
 interface ConfirmedBookingRow {
@@ -125,6 +125,24 @@ export async function POST(request: NextRequest) {
     });
   const timeRange = `${formatTime(booking.start_time)} to ${formatTime(booking.end_time)}`;
 
+  let addons: CustomerEmailAddon[] = [];
+  if (booking.transaction_id !== null) {
+    const { data: addonRows, error: addonError } = await supabaseAdmin
+      .from('booking_addons')
+      .select('name_snapshot, price_snapshot, quantity')
+      .eq('transaction_id', booking.transaction_id);
+
+    if (addonError) {
+      console.error('Failed to load add-ons for confirmation email:', addonError);
+    } else {
+      addons = (addonRows ?? []).map((row) => ({
+        name: row.name_snapshot,
+        price: row.price_snapshot,
+        quantity: row.quantity,
+      }));
+    }
+  }
+
   // Optional attachments, both admin-configured.
   const customerAttachments: { filename: string; path: string }[] = [];
   if (settings.attach_receipt_to_customer_email && booking.receipt_url) {
@@ -145,6 +163,7 @@ export async function POST(request: NextRequest) {
     dateLabel,
     slots: [{ timeRange, price: booking.price }],
     totalHours: 1,
+    addons,
     totalPrice: booking.price,
     footerHtml: settings.customer_email_footer_html,
     address: settings.landing_address,

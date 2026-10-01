@@ -4,7 +4,7 @@ import { getSupabaseAdmin } from '@/lib/supabase/admin';
 import { getMailTransporter, fetchEmailCredentials } from '@/lib/mailer';
 import { formatPrice } from '@/lib/priceTiers';
 import { fetchSiteSettings } from '@/lib/siteSettings';
-import { buildCustomerConfirmationEmail } from '@/lib/customerEmailTemplate';
+import { buildCustomerConfirmationEmail, type CustomerEmailAddon } from '@/lib/customerEmailTemplate';
 import { getDirectionsUrl } from '@/lib/googleMaps';
 
 interface NotifyBookingRow {
@@ -181,6 +181,28 @@ export async function POST(request: NextRequest) {
         customerAttachments.push({ filename: `promo.${marketingExt}`, path: settings.marketing_image_url });
       }
 
+      // All bookings in this submission share one transaction, so this
+      // single email covers them all — unlike confirm-notify's per-slot
+      // emails, it's safe to fold the add-ons cost into the total here.
+      let addons: CustomerEmailAddon[] = [];
+      if (first.transaction_id !== null) {
+        const { data: addonRows, error: addonError } = await supabaseAdmin
+          .from('booking_addons')
+          .select('name_snapshot, price_snapshot, quantity')
+          .eq('transaction_id', first.transaction_id);
+
+        if (addonError) {
+          console.error('Failed to load add-ons for confirmation email:', addonError);
+        } else {
+          addons = (addonRows ?? []).map((row) => ({
+            name: row.name_snapshot,
+            price: row.price_snapshot,
+            quantity: row.quantity,
+          }));
+        }
+      }
+      const addonsTotal = addons.reduce((sum, a) => sum + a.price * a.quantity, 0);
+
       const { text, html } = buildCustomerConfirmationEmail({
         playerName: first.player_name,
         playerPhone: first.player_phone,
@@ -193,7 +215,8 @@ export async function POST(request: NextRequest) {
           price: b.price,
         })),
         totalHours,
-        totalPrice: hasPrices ? total : null,
+        addons,
+        totalPrice: hasPrices || addons.length > 0 ? total + addonsTotal : null,
         footerHtml: settings.customer_email_footer_html,
         address: settings.landing_address,
         directionsUrl: getDirectionsUrl(settings),

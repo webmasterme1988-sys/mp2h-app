@@ -91,7 +91,7 @@ export default function BlockSlotsTab() {
     const { data, error } = await supabase
       .from('blocked_slots')
       .select('id, court_id, start_time, end_time, reason, courts(name)')
-      .order('start_time', { ascending: true });
+      .order('start_time', { ascending: false });
 
     if (error) {
       console.error('Failed to load blocked slots:', error);

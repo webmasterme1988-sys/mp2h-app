@@ -10,6 +10,8 @@ import { normalizeRichText } from '@/lib/richText';
 import RichTextEditor from './RichTextEditor';
 
 const HOUR_OPTIONS = Array.from({ length: 25 }, (_, i) => i);
+const DAY_OF_MONTH_OPTIONS = Array.from({ length: 28 }, (_, i) => i + 1);
+const REPORT_HOUR_OPTIONS = Array.from({ length: 24 }, (_, i) => i);
 
 export default function PricingTab() {
   const [loading, setLoading] = useState(true);
@@ -51,6 +53,16 @@ export default function PricingTab() {
     DEFAULT_SITE_SETTINGS.booking_reminder_2_hours
   );
 
+  const [reportEnabled, setReportEnabled] = useState(DEFAULT_SITE_SETTINGS.monthly_report_enabled);
+  const [reportDay, setReportDay] = useState(DEFAULT_SITE_SETTINGS.monthly_report_day);
+  const [reportHour, setReportHour] = useState(DEFAULT_SITE_SETTINGS.monthly_report_hour);
+  const [reportLastRunMonth, setReportLastRunMonth] = useState<string | null>(
+    DEFAULT_SITE_SETTINGS.monthly_report_last_run_month
+  );
+  const [sendingReportNow, setSendingReportNow] = useState(false);
+  const [sendReportError, setSendReportError] = useState<string | null>(null);
+  const [sendReportResult, setSendReportResult] = useState<string | null>(null);
+
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState(false);
@@ -83,6 +95,10 @@ export default function PricingTab() {
       setReminder1Hours(loaded.booking_reminder_1_hours);
       setReminder2Enabled(loaded.booking_reminder_2_enabled);
       setReminder2Hours(loaded.booking_reminder_2_hours);
+      setReportEnabled(loaded.monthly_report_enabled);
+      setReportDay(loaded.monthly_report_day);
+      setReportHour(loaded.monthly_report_hour);
+      setReportLastRunMonth(loaded.monthly_report_last_run_month);
       setLoading(false);
     });
   }, []);
@@ -123,6 +139,10 @@ export default function PricingTab() {
       setError('Reminder 2 must be a whole number of hours, at least 1.');
       return;
     }
+    if (reportEnabled && (!Number.isInteger(reportDay) || reportDay < 1 || reportDay > 28)) {
+      setError('Monthly report day must be between 1 and 28.');
+      return;
+    }
 
     setSaving(true);
 
@@ -160,6 +180,9 @@ export default function PricingTab() {
       booking_reminder_1_hours: reminder1Hours,
       booking_reminder_2_enabled: reminder2Enabled,
       booking_reminder_2_hours: reminder2Hours,
+      monthly_report_enabled: reportEnabled,
+      monthly_report_day: reportDay,
+      monthly_report_hour: reportHour,
     });
 
     if (upsertError) {
@@ -176,6 +199,33 @@ export default function PricingTab() {
     if (marketingImageInputRef.current) marketingImageInputRef.current.value = '';
     setSaving(false);
     setSuccess(true);
+  }
+
+  async function handleSendReportNow() {
+    setSendReportError(null);
+    setSendReportResult(null);
+    setSendingReportNow(true);
+
+    try {
+      const res = await fetch('/api/admin/send-monthly-report', { method: 'POST' });
+      const body = await res.json();
+
+      if (!res.ok) {
+        throw new Error(body.error || 'Could not send the report.');
+      }
+
+      setSendReportResult(
+        body.bookingsCount > 0
+          ? `Sent ${body.monthLabel}'s report (${body.bookingsCount} booking${body.bookingsCount === 1 ? '' : 's'}) to ${body.to}.`
+          : `Sent — no bookings recorded for ${body.monthLabel}.`
+      );
+      const refreshed = await fetchSiteSettings(supabase);
+      setReportLastRunMonth(refreshed.monthly_report_last_run_month);
+    } catch (err) {
+      setSendReportError(err instanceof Error ? err.message : 'Could not send the report.');
+    } finally {
+      setSendingReportNow(false);
+    }
   }
 
   async function handleAddTier(e: React.FormEvent) {
@@ -481,6 +531,78 @@ export default function PricingTab() {
                   <span>hours before the booking starts</span>
                 </span>
               </label>
+            </div>
+
+            <div className="rounded-xl border border-slate-200 p-4 space-y-4">
+              <div>
+                <span className="block text-sm font-medium text-slate-700">
+                  Monthly Booking Report
+                </span>
+                <span className="block text-xs text-slate-500 mt-0.5">
+                  Automatically emails the admin notification address a CSV of every booking from
+                  the previous calendar month — the same columns as the &quot;Export to
+                  Excel&quot; button on the Booked Customers report. Requires the Gmail settings
+                  above to be configured, and a scheduled job set up in Supabase to trigger the
+                  check periodically — see the setup SQL provided separately.
+                </span>
+              </div>
+
+              <label className="flex items-start gap-3 cursor-pointer">
+                <input
+                  type="checkbox"
+                  checked={reportEnabled}
+                  onChange={(e) => setReportEnabled(e.target.checked)}
+                  className="mt-0.5 h-4 w-4 rounded border-slate-300 text-emerald-600 focus:ring-emerald-500"
+                />
+                <span className="flex items-center gap-2 flex-wrap text-sm text-slate-700">
+                  <span>Send on day</span>
+                  <select
+                    value={reportDay}
+                    disabled={!reportEnabled}
+                    onChange={(e) => setReportDay(Number(e.target.value))}
+                    onClick={(e) => e.stopPropagation()}
+                    className="rounded-lg border border-slate-300 px-2 py-1 text-sm disabled:bg-slate-50 disabled:text-slate-400"
+                  >
+                    {DAY_OF_MONTH_OPTIONS.map((d) => (
+                      <option key={d} value={d}>
+                        {d}
+                      </option>
+                    ))}
+                  </select>
+                  <span>of each month at</span>
+                  <select
+                    value={reportHour}
+                    disabled={!reportEnabled}
+                    onChange={(e) => setReportHour(Number(e.target.value))}
+                    onClick={(e) => e.stopPropagation()}
+                    className="rounded-lg border border-slate-300 px-2 py-1 text-sm disabled:bg-slate-50 disabled:text-slate-400"
+                  >
+                    {REPORT_HOUR_OPTIONS.map((h) => (
+                      <option key={h} value={h}>
+                        {formatHourLabel(h)}
+                      </option>
+                    ))}
+                  </select>
+                  <span>(Philippine time)</span>
+                </span>
+              </label>
+
+              <p className="text-xs text-slate-400">
+                {reportLastRunMonth ? `Last sent for: ${reportLastRunMonth}` : 'Never sent yet.'}
+              </p>
+
+              <div className="flex flex-wrap items-center gap-3">
+                <button
+                  type="button"
+                  onClick={handleSendReportNow}
+                  disabled={sendingReportNow}
+                  className="rounded-lg bg-slate-100 text-slate-700 border border-slate-200 text-xs font-medium px-3 py-1.5 hover:bg-slate-200 disabled:opacity-40 disabled:cursor-not-allowed transition-colors"
+                >
+                  {sendingReportNow ? 'Sending…' : "Send Previous Month's Report Now"}
+                </button>
+              </div>
+              {sendReportError && <p className="text-xs text-red-600">{sendReportError}</p>}
+              {sendReportResult && <p className="text-xs text-emerald-700">{sendReportResult}</p>}
             </div>
 
             <label className="flex items-start gap-3 cursor-pointer">

@@ -31,3 +31,12 @@ export async function clearReceiptsBucket(admin: SupabaseAdmin) {
   if (removeError) throw removeError;
   return paths.length;
 }
+
+// Public URLs look like `.../storage/v1/object/public/receipts/<path>` —
+// pull the path back out so a specific file (not the whole bucket) can be
+// deleted, e.g. for the per-booking age-based cleanup.
+export function receiptPathFromPublicUrl(url: string): string | null {
+  const marker = '/receipts/';
+  const i = url.indexOf(marker);
+  return i === -1 ? null : url.slice(i + marker.length);
+}

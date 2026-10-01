@@ -450,10 +450,22 @@ CREATE TABLE IF NOT EXISTS "public"."site_settings" (
     "booking_reminder_1_hours" integer DEFAULT 24 NOT NULL,
     "booking_reminder_2_enabled" boolean DEFAULT false NOT NULL,
     "booking_reminder_2_hours" integer DEFAULT 4 NOT NULL,
+    "booking_cleanup_enabled" boolean DEFAULT false NOT NULL,
+    "booking_cleanup_retention_days" integer DEFAULT 90 NOT NULL,
+    "booking_cleanup_hour" integer DEFAULT 3 NOT NULL,
+    "booking_cleanup_last_run_date" "date",
+    "monthly_report_enabled" boolean DEFAULT false NOT NULL,
+    "monthly_report_day" integer DEFAULT 1 NOT NULL,
+    "monthly_report_hour" integer DEFAULT 6 NOT NULL,
+    "monthly_report_last_run_month" "text",
     CONSTRAINT "site_settings_hours_check" CHECK ((("opening_hour" >= 0) AND ("opening_hour" < 24) AND ("closing_hour" > "opening_hour") AND ("closing_hour" <= 24))),
     CONSTRAINT "site_settings_pending_hold_check" CHECK (("pending_hold_minutes" > 0)),
     CONSTRAINT "site_settings_pricing_mode_check" CHECK (("pricing_mode" = ANY (ARRAY['flat'::"text", 'tiered'::"text"]))),
-    CONSTRAINT "site_settings_single_row" CHECK (("id" = 1))
+    CONSTRAINT "site_settings_single_row" CHECK (("id" = 1)),
+    CONSTRAINT "site_settings_cleanup_retention_check" CHECK (("booking_cleanup_retention_days" > 0)),
+    CONSTRAINT "site_settings_cleanup_hour_check" CHECK ((("booking_cleanup_hour" >= 0) AND ("booking_cleanup_hour" < 24))),
+    CONSTRAINT "site_settings_report_day_check" CHECK ((("monthly_report_day" >= 1) AND ("monthly_report_day" <= 28))),
+    CONSTRAINT "site_settings_report_hour_check" CHECK ((("monthly_report_hour" >= 0) AND ("monthly_report_hour" < 24)))
 );
 
 

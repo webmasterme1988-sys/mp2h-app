@@ -1,25 +1,9 @@
-// Plain CSV rather than a real .xlsx: Excel opens .csv natively (no
-// "unsupported format" prompt), and it avoids pulling in a spreadsheet
-// library — the popular one for this (`xlsx`/SheetJS on npm) currently
-// ships unfixed high-severity advisories.
+import { buildCsvString } from './csv';
+
 export function downloadCsv(filename: string, rows: Record<string, string | number>[]) {
   if (rows.length === 0) return;
 
-  const headers = Object.keys(rows[0]);
-
-  function escapeCell(value: string | number) {
-    const str = String(value);
-    return /[",\n]/.test(str) ? `"${str.replace(/"/g, '""')}"` : str;
-  }
-
-  const lines = [
-    headers.join(','),
-    ...rows.map((row) => headers.map((h) => escapeCell(row[h])).join(',')),
-  ];
-
-  // Leading BOM so Excel detects UTF-8 correctly instead of mangling
-  // non-ASCII characters like the peso sign.
-  const blob = new Blob(['﻿' + lines.join('\r\n')], {
+  const blob = new Blob([buildCsvString(rows)], {
     type: 'text/csv;charset=utf-8;',
   });
   const url = URL.createObjectURL(blob);

@@ -1224,6 +1224,27 @@ export default function BookingPageClient({
                     </p>
                   </div>
 
+                  {/* Payment instructions — above the QR so it's read before
+                      the customer switches apps to pay. */}
+                  <div className="rounded-xl bg-amber-50 border border-amber-200 p-4 text-sm text-amber-800">
+                    <p className="font-medium mb-1.5">Complete Your Booking Payment:</p>
+                    <ul className="list-disc pl-5 space-y-1">
+                      <li>
+                        Keep this browser open. Do not close this tab—simply minimize or switch
+                        screens on your phone to open your payment app.
+                      </li>
+                      <li>Complete your payment.</li>
+                      <li>
+                        Return here. Switch back to this screen to upload your payment screenshot
+                        and continue your booking.
+                      </li>
+                    </ul>
+                    <p className="font-medium mt-2">
+                      Important: No confirmation number means your booking is not successful.
+                    </p>
+                    <p className="mt-2">Need help? Contact us via the MP2H Page if you encounter any issues.</p>
+                  </div>
+
                   {/* Payment QR */}
                   <div className="rounded-xl bg-slate-50 border border-slate-200 p-4 text-center">
                     <p className="text-sm font-medium text-slate-700 mb-2">

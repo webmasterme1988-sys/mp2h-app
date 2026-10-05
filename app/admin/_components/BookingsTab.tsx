@@ -183,16 +183,17 @@ export default function BookingsTab() {
   const [courts, setCourts] = useState<Court[]>([]);
 
   // ---------- Filters ----------
-  // Defaults to "Today" — fetching and rendering the entire history of the
-  // table on every mount (including every time the admin switches back to
-  // this tab) is what caused the dashboard to freeze once real booking
-  // volume built up. This filter is on the transaction date (created_at),
-  // i.e. when the booking was made — separate from "Booking date" below,
-  // which is the date of the court slot itself (start_time).
-  const [dateFilterMode, setDateFilterMode] = useState<DateFilterMode>('today');
+  // Transaction date (created_at, when the booking was made) defaults to
+  // "All dates" — separate from "Booking date" below, which is the date of
+  // the court slot itself (start_time) and defaults to "Today" instead.
+  // That booking-date default is what keeps the fetch bounded (rather than
+  // the entire table's history, which is what caused the dashboard to
+  // freeze once real booking volume built up) even with transaction date
+  // left unbounded — the two filters are applied together server-side.
+  const [dateFilterMode, setDateFilterMode] = useState<DateFilterMode>('all');
   const [customDateFrom, setCustomDateFrom] = useState('');
   const [customDateTo, setCustomDateTo] = useState('');
-  const [bookingDateFilterMode, setBookingDateFilterMode] = useState<DateFilterMode>('all');
+  const [bookingDateFilterMode, setBookingDateFilterMode] = useState<DateFilterMode>('today');
   const [customBookingDateFrom, setCustomBookingDateFrom] = useState('');
   const [customBookingDateTo, setCustomBookingDateTo] = useState('');
   const [statusFilter, setStatusFilter] = useState<StatusFilter>('all');
@@ -260,10 +261,10 @@ export default function BookingsTab() {
   }, [bookings, phoneSearch, referenceSearch]);
 
   function clearFilters() {
-    setDateFilterMode('today');
+    setDateFilterMode('all');
     setCustomDateFrom('');
     setCustomDateTo('');
-    setBookingDateFilterMode('all');
+    setBookingDateFilterMode('today');
     setCustomBookingDateFrom('');
     setCustomBookingDateTo('');
     setStatusFilter('all');
@@ -274,8 +275,8 @@ export default function BookingsTab() {
   }
 
   const filtersActive =
-    dateFilterMode !== 'today' ||
-    bookingDateFilterMode !== 'all' ||
+    dateFilterMode !== 'all' ||
+    bookingDateFilterMode !== 'today' ||
     statusFilter !== 'all' ||
     courtFilter !== 'all' ||
     phoneSearch.trim() !== '' ||

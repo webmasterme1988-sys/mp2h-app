@@ -43,9 +43,9 @@ export function buildTimeSlots(
   return slots;
 }
 
+// Always Philippine time, not the runtime's local timezone: pages that use
+// this are server-rendered on a UTC host, so a local-time "today" would lag
+// a day behind between midnight and 8:00 AM in Manila.
 export function todayISODate() {
-  const now = new Date();
-  const offset = now.getTimezoneOffset();
-  const local = new Date(now.getTime() - offset * 60 * 1000);
-  return local.toISOString().split('T')[0];
+  return new Date().toLocaleDateString('en-CA', { timeZone: 'Asia/Manila' }); // 'YYYY-MM-DD'
 }

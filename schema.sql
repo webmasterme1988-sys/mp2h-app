@@ -102,6 +102,44 @@ $_$;
 ALTER FUNCTION "public"."assign_confirmation_number"() OWNER TO "postgres";
 
 
+CREATE OR REPLACE FUNCTION "public"."enforce_no_double_booking"() RETURNS "trigger"
+    LANGUAGE "plpgsql" SECURITY DEFINER
+    SET "search_path" TO 'public'
+    AS $$
+declare
+  hold_minutes integer;
+begin
+  if new.status is null or new.status not in ('pending', 'confirmed') or new.court_id is null then
+    return new;
+  end if;
+
+  -- Serializes concurrent bookings for this exact court + slot, so the
+  -- second one waits for the first to commit and then sees it below.
+  perform pg_advisory_xact_lock(hashtextextended(new.court_id::text || '|' || new.start_time::text, 0));
+
+  select pending_hold_minutes into hold_minutes from public.site_settings where id = 1;
+  hold_minutes := coalesce(hold_minutes, 10);
+
+  if exists (
+    select 1 from public.bookings b
+    where b.court_id = new.court_id
+      and b.start_time = new.start_time
+      and b.id <> new.id
+      and (
+        b.status = 'confirmed'
+        or (b.status = 'pending' and b.created_at > now() - make_interval(mins => hold_minutes))
+      )
+  ) then
+    raise exception 'Sorry, this time slot is no longer available. Please select another.';
+  end if;
+
+  return new;
+end;
+$$;
+
+ALTER FUNCTION "public"."enforce_no_double_booking"() OWNER TO "postgres";
+
+
 CREATE OR REPLACE FUNCTION "public"."enforce_booking_blacklist"() RETURNS "trigger"
     LANGUAGE "plpgsql" SECURITY DEFINER
     SET "search_path" TO 'public'
@@ -612,6 +650,10 @@ CREATE OR REPLACE TRIGGER "trg_assign_confirmation_number" BEFORE INSERT ON "pub
 
 
 CREATE OR REPLACE TRIGGER "trg_enforce_booking_blacklist" BEFORE INSERT ON "public"."bookings" FOR EACH ROW EXECUTE FUNCTION "public"."enforce_booking_blacklist"();
+
+
+
+CREATE OR REPLACE TRIGGER "trg_enforce_no_double_booking" BEFORE INSERT OR UPDATE OF "court_id", "start_time", "status" ON "public"."bookings" FOR EACH ROW EXECUTE FUNCTION "public"."enforce_no_double_booking"();
 
 
 

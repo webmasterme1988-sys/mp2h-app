@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useEffect, useCallback, useMemo } from 'react';
+import { useState, useEffect, useCallback, useMemo, useRef } from 'react';
 import { supabase } from '@/lib/supabase';
 import DateCalendar from '@/components/DateCalendar';
 import { buildTimeSlots, todayISODate, type TimeSlot } from '@/lib/timeSlots';
@@ -95,6 +95,10 @@ export default function BookingPageClient({
   const [compressingReceipt, setCompressingReceipt] = useState(false);
 
   const [submitState, setSubmitState] = useState<SubmitState>('idle');
+  // Synchronous double-submit guard. submitState alone isn't enough: the
+  // button only disables after a re-render, so a quick double tap on a
+  // slow phone could start two submissions and book the same slot twice.
+  const submittingRef = useRef(false);
   const [submitError, setSubmitError] = useState<string | null>(null);
   const [lastTransactionId, setLastTransactionId] = useState<number | null>(null);
   const [lastConfirmationNumber, setLastConfirmationNumber] = useState<string | null>(null);
@@ -580,7 +584,10 @@ export default function BookingPageClient({
       return;
     }
 
+    if (submittingRef.current) return;
+    submittingRef.current = true;
     setSubmitError(null);
+    setSubmitState('uploading');
 
     try {
       // 1. Re-verify the slot(s) are still actually free right before
@@ -616,7 +623,6 @@ export default function BookingPageClient({
 
       // 3. Upload receipt to Supabase Storage — one receipt covers every
       // slot in this submission, since it's a single payment for all of them.
-      setSubmitState('uploading');
 
       const fileExt = receiptFile.name.split('.').pop() || 'jpg';
       const safeName = playerName.trim().replace(/[^a-zA-Z0-9]/g, '-').toLowerCase();
@@ -728,6 +734,8 @@ export default function BookingPageClient({
       console.error(err);
       setSubmitState('error');
       setSubmitError(err instanceof Error ? err.message : 'Something went wrong. Please try again.');
+    } finally {
+      submittingRef.current = false;
     }
   }
 
